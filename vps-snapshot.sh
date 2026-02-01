@@ -250,7 +250,6 @@ create_snapshot() {
 
     mkdir -p "$LOCAL_DIR"
     log "创建快照: $snapshot_name"
-    send_telegram "🔄 <b>开始备份</b>%0AVPS: ${VPS_NAME}"
 
     local excludes="--exclude=/proc --exclude=/sys --exclude=/dev"
     excludes+=" --exclude=/run --exclude=/tmp --exclude=/mnt"
@@ -299,15 +298,22 @@ run_backup() {
     local start=$(date +%s)
 
     log "===== 开始备份 [$VPS_NAME] ====="
+    send_telegram "🔄 <b>开始备份</b>%0AVPS: ${VPS_NAME}%0A时间: $(date '+%Y-%m-%d %H:%M:%S')"
+    
     local snapshot=$(create_snapshot)
+    local size=$(du -h "$snapshot" | cut -f1)
+    local filename=$(basename "$snapshot")
+    
+    send_telegram "📦 <b>快照完成</b>%0AVPS: ${VPS_NAME}%0A文件: ${filename}%0A大小: ${size}%0A开始同步到远程..."
+    
     sync_to_remote "$snapshot"
     cleanup_local
     cleanup_remote
 
     local dur=$(($(date +%s) - start))
-    local size=$(du -h "$snapshot" | cut -f1)
+    local remote_path="${REMOTE_DIR}/${filename}"
     log "===== 备份完成 ====="
-    send_telegram "✅ <b>备份完成</b>%0AVPS: ${VPS_NAME}%0A大小: ${size}%0A耗时: ${dur}秒"
+    send_telegram "✅ <b>备份完成</b>%0AVPS: ${VPS_NAME}%0A大小: ${size}%0A耗时: ${dur}秒%0A远程: ${REMOTE_IP}:${remote_path}"
 }
 
 #===============================================================================
