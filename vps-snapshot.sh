@@ -439,31 +439,42 @@ restore_from_remote() {
 }
 
 restore_custom() {
-    load_config || return 1
-
-    read -p "输入远程快照完整路径: " remote_file
+    echo -e "\n${CYAN}=== 自定义远程恢复 ===${NC}"
+    echo "从任意服务器拉取快照恢复"
+    echo ""
+    
+    read -p "远程服务器 IP: " custom_ip
+    [ -z "$custom_ip" ] && { error "IP 不能为空"; return 1; }
+    
+    read -p "SSH 端口 [22]: " custom_port
+    custom_port=${custom_port:-22}
+    
+    read -p "SSH 用户名 [root]: " custom_user
+    custom_user=${custom_user:-root}
+    
+    read -s -p "SSH 密码: " custom_pass
+    echo ""
+    
+    read -p "快照完整路径 (如 /backup/vps/xxx.tar.gz): " remote_file
     [ -z "$remote_file" ] && { error "路径不能为空"; return 1; }
 
-    local local_file="$LOCAL_DIR/$(basename $remote_file)"
-    mkdir -p "$LOCAL_DIR"
+    local local_file="/tmp/$(basename $remote_file)"
 
-    log "下载: $remote_file"
-    if [ "$AUTH_METHOD" = "key" ]; then
-        rsync -avz -e "ssh -i $SSH_KEY_PATH -p $REMOTE_PORT" \
-            "${REMOTE_USER}@${REMOTE_IP}:${remote_file}" "$local_file"
-    else
-        sshpass -p "$REMOTE_PASS" rsync -avz \
-            -e "ssh -p $REMOTE_PORT" \
-            "${REMOTE_USER}@${REMOTE_IP}:${remote_file}" "$local_file"
-    fi
+    log "从 ${custom_user}@${custom_ip} 下载: $remote_file"
+    sshpass -p "$custom_pass" rsync -avz --progress \
+        -e "ssh -o StrictHostKeyChecking=no -p $custom_port" \
+        "${custom_user}@${custom_ip}:${remote_file}" "$local_file"
+
+    [ ! -f "$local_file" ] && { error "下载失败"; return 1; }
 
     local mode=$(select_restore_mode)
 
     echo -e "\n${RED}警告: 即将恢复!${NC}"
     read -p "确认? [y/N]: " confirm
-    [[ ! "$confirm" =~ ^[Yy]$ ]] && return
+    [[ ! "$confirm" =~ ^[Yy]$ ]] && { rm -f "$local_file"; return; }
 
     do_restore "$local_file" "$mode"
+    rm -f "$local_file"
 }
 
 #===============================================================================
