@@ -590,6 +590,18 @@ migrate_server() {
     do_restore "$local_snapshot" "$mode"
     rm -f "$local_snapshot"
     
+    echo -e "\n${GREEN}迁移完成！${NC}"
+    echo -e "${YELLOW}建议操作:${NC}"
+    echo "1. 重启当前服务器"
+    echo "2. 关闭源服务器 (${src_ip}) 避免冲突"
+    echo ""
+    read -p "是否关闭源服务器? [y/N]: " shutdown_src
+    if [[ "$shutdown_src" =~ ^[Yy]$ ]]; then
+        log "正在关闭源服务器..."
+        sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -p "$src_port" "${src_user}@${src_ip}" "shutdown -h now" &>/dev/null || true
+        echo -e "${GREEN}源服务器关机命令已发送${NC}"
+    fi
+    
     log "迁移完成！建议重启服务器"
 }
 
