@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v2.0
+# VPS 快照备份脚本 v2.1
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 创建/恢复快照 + rsync 远程同步 + Telegram 通知 + 自动清理
 #===============================================================================
@@ -22,7 +22,7 @@ SSH_KEY_PATH="/root/.ssh/vps_snapshot_key"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v2.0                           ║"
+    echo "║           VPS 快照备份脚本 v2.1                           ║"
     echo "║       支持 Ubuntu/Debian/CentOS/Alpine                    ║"
     echo "║       支持密码/SSH密钥认证                                ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
@@ -329,6 +329,52 @@ list_remote_snapshots() {
 # 恢复快照
 #-------------------------------------------------------------------------------
 
+select_restore_mode() {
+    echo -e "\n${YELLOW}选择恢复模式:${NC}"
+    echo "1) 覆盖模式 - 只覆盖快照中的文件（安全，保留新增文件）"
+    echo "2) 完整恢复 - 删除快照中不存在的文件（危险，恢复到干净状态）"
+    read -p "请选择 [1]: " mode
+    echo "${mode:-1}"
+}
+
+do_restore() {
+    local file="$1"
+    local mode="$2"
+    local temp_dir="/tmp/snapshot_restore_$$"
+    
+    log "解压快照到临时目录..."
+    mkdir -p "$temp_dir"
+    tar -xzf "$file" -C "$temp_dir" 2>/dev/null
+    
+    if [ "$mode" = "2" ]; then
+        log "完整恢复模式: 使用 rsync --delete"
+        echo -e "${RED}警告: 将删除系统中快照不存在的文件！${NC}"
+        echo -e "${RED}排除目录: /proc /sys /dev /run /tmp /mnt /media${NC}"
+        read -p "最后确认，输入 YES 继续: " final
+        [ "$final" != "YES" ] && { rm -rf "$temp_dir"; return 1; }
+        
+        # 完整恢复，删除快照中不存在的文件
+        rsync -aAXv --delete \
+            --exclude='/proc/*' \
+            --exclude='/sys/*' \
+            --exclude='/dev/*' \
+            --exclude='/run/*' \
+            --exclude='/tmp/*' \
+            --exclude='/mnt/*' \
+            --exclude='/media/*' \
+            --exclude='/lost+found' \
+            --exclude="$LOCAL_DIR/*" \
+            --exclude="$temp_dir" \
+            "$temp_dir/" /
+    else
+        log "覆盖模式: 只覆盖已有文件"
+        rsync -aAXv "$temp_dir/" /
+    fi
+    
+    rm -rf "$temp_dir"
+    log "恢复完成，建议重启系统"
+}
+
 restore_local() {
     load_config || exit 1
     list_local_snapshots
@@ -339,13 +385,13 @@ restore_local() {
     
     [ -z "$file" ] && { error "无效选择"; return 1; }
     
+    local mode=$(select_restore_mode)
+    
     echo -e "${RED}警告: 即将恢复快照到系统！${NC}"
     read -p "确认恢复 $file? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
     
-    log "恢复快照: $file"
-    tar -xzf "$file" -C / 2>/dev/null
-    log "恢复完成，建议重启系统"
+    do_restore "$file" "$mode"
 }
 
 restore_from_remote() {
@@ -360,6 +406,7 @@ restore_from_remote() {
     
     log "下载远程快照: $file"
     local local_file="$LOCAL_DIR/$(basename $file)"
+    mkdir -p "$LOCAL_DIR"
     
     if [ "$AUTH_METHOD" = "key" ]; then
         rsync -avz -e "ssh -i $SSH_KEY_PATH -p $REMOTE_PORT" \
@@ -370,13 +417,13 @@ restore_from_remote() {
             "${REMOTE_USER}@${REMOTE_IP}:${file}" "$local_file"
     fi
     
+    local mode=$(select_restore_mode)
+    
     echo -e "${RED}警告: 即将恢复快照！${NC}"
     read -p "确认恢复? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
     
-    log "恢复快照..."
-    tar -xzf "$local_file" -C / 2>/dev/null
-    log "恢复完成，建议重启"
+    do_restore "$local_file" "$mode"
 }
 
 restore_custom_remote() {
@@ -398,12 +445,13 @@ restore_custom_remote() {
             "${REMOTE_USER}@${REMOTE_IP}:${remote_file}" "$local_file"
     fi
     
+    local mode=$(select_restore_mode)
+    
     echo -e "${RED}警告: 即将恢复!${NC}"
     read -p "确认? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
     
-    tar -xzf "$local_file" -C / 2>/dev/null
-    log "恢复完成"
+    do_restore "$local_file" "$mode"
 }
 
 #-------------------------------------------------------------------------------
