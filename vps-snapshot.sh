@@ -579,9 +579,9 @@ migrate_server() {
     echo -e "源: ${src_user}@${src_ip}"
     echo -e "目标: 当前服务器"
     echo ""
-    read -p "输入 MIGRATE 确认迁移: " confirm
+    read -p "输入 确认迁移 继续: " confirm
     
-    if [ "$confirm" != "MIGRATE" ]; then
+    if [ "$confirm" != "确认迁移" ]; then
         rm -f "$local_snapshot"
         echo "已取消"
         return 1
