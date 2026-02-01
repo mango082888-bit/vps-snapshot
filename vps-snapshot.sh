@@ -495,6 +495,105 @@ restore_custom() {
 }
 
 #===============================================================================
+# 一键迁移
+#===============================================================================
+
+migrate_server() {
+    echo -e "\n${CYAN}=== 一键迁移 ===${NC}"
+    echo "从源服务器创建快照，直接恢复到当前服务器"
+    echo -e "${YELLOW}注意: 会覆盖当前服务器数据!${NC}\n"
+    
+    # 源服务器信息
+    echo -e "${CYAN}--- 源服务器 (A) ---${NC}"
+    read -p "源服务器 IP: " src_ip
+    [ -z "$src_ip" ] && { error "IP 不能为空"; return 1; }
+    
+    read -p "SSH 端口 [22]: " src_port
+    src_port=${src_port:-22}
+    
+    read -p "SSH 用户名 [root]: " src_user
+    src_user=${src_user:-root}
+    
+    read -s -p "SSH 密码: " src_pass
+    echo ""
+    
+    # 测试连接
+    log "测试源服务器连接..."
+    if ! sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p "$src_port" "${src_user}@${src_ip}" "echo ok" &>/dev/null; then
+        error "无法连接源服务器"
+        return 1
+    fi
+    log "源服务器连接成功"
+    
+    # 备份目录选择
+    echo -e "\n${CYAN}备份内容:${NC}"
+    echo "1) 完整系统"
+    echo "2) 仅 /etc /home /root /var/www"
+    echo "3) 自定义目录"
+    read -p "选择 [1]: " backup_choice
+    
+    case ${backup_choice:-1} in
+        2) backup_dirs="/etc /home /root /var/www" ;;
+        3) read -p "输入目录 (空格分隔): " backup_dirs ;;
+        *) backup_dirs="/" ;;
+    esac
+    
+    local timestamp=$(date '+%Y%m%d_%H%M%S')
+    local remote_snapshot="/tmp/migrate_${timestamp}.tar.gz"
+    local local_snapshot="/tmp/migrate_${timestamp}.tar.gz"
+    
+    # 在源服务器创建快照
+    log "在源服务器创建快照..."
+    echo "正在打包，请稍候..."
+    
+    local excludes="--exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp --exclude=/mnt --exclude=/media --exclude=/lost+found --exclude=/var/cache"
+    
+    if [ "$backup_dirs" = "/" ]; then
+        sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -p "$src_port" "${src_user}@${src_ip}" \
+            "tar $excludes -czf $remote_snapshot / 2>/dev/null"
+    else
+        sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -p "$src_port" "${src_user}@${src_ip}" \
+            "tar -czf $remote_snapshot $backup_dirs 2>/dev/null"
+    fi
+    
+    # 获取快照大小
+    local size=$(sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -p "$src_port" "${src_user}@${src_ip}" "du -h $remote_snapshot | cut -f1")
+    log "源服务器快照完成: $size"
+    
+    # 下载快照
+    log "下载快照到本地..."
+    sshpass -p "$src_pass" rsync -avz --progress \
+        -e "ssh -o StrictHostKeyChecking=no -p $src_port" \
+        "${src_user}@${src_ip}:${remote_snapshot}" "$local_snapshot"
+    
+    # 清理源服务器临时文件
+    sshpass -p "$src_pass" ssh -o StrictHostKeyChecking=no -p "$src_port" "${src_user}@${src_ip}" "rm -f $remote_snapshot"
+    
+    [ ! -f "$local_snapshot" ] && { error "下载失败"; return 1; }
+    
+    # 选择恢复模式
+    local mode=$(select_restore_mode)
+    
+    echo -e "\n${RED}!!! 警告 !!!${NC}"
+    echo -e "${RED}即将把源服务器数据恢复到当前服务器${NC}"
+    echo -e "源: ${src_user}@${src_ip}"
+    echo -e "目标: 当前服务器"
+    echo ""
+    read -p "输入 MIGRATE 确认迁移: " confirm
+    
+    if [ "$confirm" != "MIGRATE" ]; then
+        rm -f "$local_snapshot"
+        echo "已取消"
+        return 1
+    fi
+    
+    do_restore "$local_snapshot" "$mode"
+    rm -f "$local_snapshot"
+    
+    log "迁移完成！建议重启服务器"
+}
+
+#===============================================================================
 # 定时任务
 #===============================================================================
 
@@ -556,9 +655,10 @@ show_menu() {
     echo "6) 恢复本地快照"
     echo "7) 从远程恢复快照"
     echo "8) 自定义远程恢复"
-    echo "9) 修改配置"
-    echo "10) 设置定时任务"
-    echo "11) 查看状态"
+    echo "9) 一键迁移 (A→B)"
+    echo "10) 修改配置"
+    echo "11) 设置定时任务"
+    echo "12) 查看状态"
     echo "0) 退出"
     echo ""
     read -p "请选择: " choice
@@ -572,9 +672,10 @@ show_menu() {
         6) restore_local ;;
         7) restore_from_remote ;;
         8) restore_custom ;;
-        9) edit_config ;;
-        10) setup_cron ;;
-        11) show_status ;;
+        9) migrate_server ;;
+        10) edit_config ;;
+        11) setup_cron ;;
+        12) show_status ;;
         0) exit 0 ;;
         *) echo "无效选择" ;;
     esac
