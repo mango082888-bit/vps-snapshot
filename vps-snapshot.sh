@@ -531,31 +531,33 @@ show_menu() {
     print_banner
     echo -e "${GREEN}VPS: ${VPS_NAME:-未配置}${NC}\n"
 
-    echo "1) 创建快照并同步"
-    echo "2) 仅创建本地快照"
-    echo "3) 查看本地快照"
-    echo "4) 查看远程快照"
-    echo "5) 恢复本地快照"
-    echo "6) 从远程恢复快照"
-    echo "7) 自定义远程恢复"
-    echo "8) 修改配置"
-    echo "9) 设置定时任务"
-    echo "10) 查看状态"
+    echo "1) 首次配置 / 重新配置"
+    echo "2) 创建快照并同步"
+    echo "3) 仅创建本地快照"
+    echo "4) 查看本地快照"
+    echo "5) 查看远程快照"
+    echo "6) 恢复本地快照"
+    echo "7) 从远程恢复快照"
+    echo "8) 自定义远程恢复"
+    echo "9) 修改配置"
+    echo "10) 设置定时任务"
+    echo "11) 查看状态"
     echo "0) 退出"
     echo ""
     read -p "请选择: " choice
 
     case $choice in
-        1) run_backup ;;
-        2) load_config && create_snapshot ;;
-        3) load_config && list_local_snapshots ;;
-        4) load_config && list_remote_snapshots ;;
-        5) restore_local ;;
-        6) restore_from_remote ;;
-        7) restore_custom ;;
-        8) edit_config ;;
-        9) setup_cron ;;
-        10) show_status ;;
+        1) install_dependencies; interactive_setup ;;
+        2) run_backup ;;
+        3) load_config && create_snapshot ;;
+        4) load_config && list_local_snapshots ;;
+        5) load_config && list_remote_snapshots ;;
+        6) restore_local ;;
+        7) restore_from_remote ;;
+        8) restore_custom ;;
+        9) edit_config ;;
+        10) setup_cron ;;
+        11) show_status ;;
         0) exit 0 ;;
         *) echo "无效选择" ;;
     esac
