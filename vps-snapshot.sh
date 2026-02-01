@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v2.2
+# VPS 快照备份脚本 v2.3
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 创建/恢复快照 + rsync 远程同步 + Telegram 通知 + 自动清理
 #===============================================================================
@@ -22,7 +22,7 @@ SSH_KEY_PATH="/root/.ssh/vps_snapshot_key"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v2.2                           ║"
+    echo "║           VPS 快照备份脚本 v2.3                           ║"
     echo "║       支持 Ubuntu/Debian/CentOS/Alpine                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -301,12 +301,23 @@ run_backup() {
     send_telegram "🔄 <b>开始备份</b>%0AVPS: ${VPS_NAME}%0A时间: $(date '+%Y-%m-%d %H:%M:%S')"
     
     local snapshot=$(create_snapshot)
+    if [ ! -f "$snapshot" ]; then
+        send_telegram "❌ <b>备份失败</b>%0AVPS: ${VPS_NAME}%0A原因: 快照创建失败"
+        error "快照创建失败"
+        return 1
+    fi
+    
     local size=$(du -h "$snapshot" | cut -f1)
     local filename=$(basename "$snapshot")
     
-    send_telegram "📦 <b>快照完成</b>%0AVPS: ${VPS_NAME}%0A文件: ${filename}%0A大小: ${size}%0A开始同步到远程..."
+    send_telegram "📦 <b>快照完成</b>%0AVPS: ${VPS_NAME}%0A文件: ${filename}%0A大小: ${size}%0A开始同步..."
     
-    sync_to_remote "$snapshot"
+    if ! sync_to_remote "$snapshot"; then
+        send_telegram "❌ <b>同步失败</b>%0AVPS: ${VPS_NAME}%0A原因: 远程同步失败"
+        error "远程同步失败"
+        return 1
+    fi
+    
     cleanup_local
     cleanup_remote
 
