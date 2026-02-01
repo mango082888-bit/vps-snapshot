@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v2.1
+# VPS 快照备份脚本 v2.2
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 创建/恢复快照 + rsync 远程同步 + Telegram 通知 + 自动清理
 #===============================================================================
@@ -22,16 +22,15 @@ SSH_KEY_PATH="/root/.ssh/vps_snapshot_key"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v2.1                           ║"
+    echo "║           VPS 快照备份脚本 v2.2                           ║"
     echo "║       支持 Ubuntu/Debian/CentOS/Alpine                    ║"
-    echo "║       支持密码/SSH密钥认证                                ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
 log() { echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
-error() { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" >&2; echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >> "$LOG_FILE"; }
-warn() { echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $1${NC}" >&2; }
+error() { echo -e "${RED}[ERROR] $1${NC}" >&2; echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >> "$LOG_FILE"; }
+warn() { echo -e "${YELLOW}[WARN] $1${NC}" >&2; }
 
 detect_os() {
     if [ -f /etc/os-release ]; then . /etc/os-release; echo "$ID"
@@ -52,9 +51,9 @@ install_dependencies() {
     log "依赖安装完成"
 }
 
-#-------------------------------------------------------------------------------
-# SSH 密钥管理
-#-------------------------------------------------------------------------------
+#===============================================================================
+# SSH 连接
+#===============================================================================
 
 generate_ssh_key() {
     log "生成 SSH 密钥对..."
@@ -69,7 +68,7 @@ generate_ssh_key() {
 }
 
 copy_ssh_key_to_remote() {
-    log "复制公钥到远程服务器 ${REMOTE_USER}@${REMOTE_IP}..."
+    log "复制公钥到远程服务器..."
     sshpass -p "$1" ssh-copy-id -i "${SSH_KEY_PATH}.pub" -o StrictHostKeyChecking=no -p "$REMOTE_PORT" "${REMOTE_USER}@${REMOTE_IP}"
     log "公钥复制完成"
 }
@@ -77,10 +76,10 @@ copy_ssh_key_to_remote() {
 test_ssh_connection() {
     log "测试 SSH 连接..."
     if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o BatchMode=yes -p "$REMOTE_PORT" "${REMOTE_USER}@${REMOTE_IP}" "echo ok" &>/dev/null; then
-        log "SSH 密钥连接成功 ✓"
+        log "SSH 连接成功"
         return 0
     else
-        error "SSH 密钥连接失败"
+        error "SSH 连接失败"
         return 1
     fi
 }
@@ -99,119 +98,22 @@ send_telegram() {
         -d chat_id="$TG_CHAT_ID" -d text="$1" -d parse_mode="HTML" >/dev/null 2>&1
 }
 
-#-------------------------------------------------------------------------------
-# 交互式配置
-#-------------------------------------------------------------------------------
+#===============================================================================
+# 配置管理
+#===============================================================================
 
-interactive_setup() {
-    print_banner
-    echo -e "${YELLOW}开始交互式配置...${NC}\n"
-
-    # VPS 名称
-    read -p "请输入 VPS 名称 (用于区分备份): " VPS_NAME
-    VPS_NAME=${VPS_NAME:-$(hostname)}
-
-    # 远程服务器信息
-    read -p "请输入远程服务器 IP: " REMOTE_IP
-    read -p "请输入 SSH 端口 [22]: " REMOTE_PORT
-    REMOTE_PORT=${REMOTE_PORT:-22}
-    read -p "请输入 SSH 用户名 [root]: " REMOTE_USER
-    REMOTE_USER=${REMOTE_USER:-root}
-
-    # 认证方式
-    echo -e "\n${YELLOW}选择认证方式:${NC}"
-    echo "1) SSH 密钥 (推荐)"
-    echo "2) 密码"
-    read -p "请选择 [1]: " AUTH_TYPE
-
-    if [ "${AUTH_TYPE:-1}" = "1" ]; then
-        setup_ssh_key_auth
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        return 0
     else
-        setup_password_auth
+        error "未找到配置文件，请先运行: $0 setup"
+        return 1
     fi
-}
-
-setup_ssh_key_auth() {
-    AUTH_METHOD="key"
-    REMOTE_PASS=""
-    
-    echo -e "\n${YELLOW}SSH 密钥认证配置${NC}"
-    
-    if [ -f "$SSH_KEY_PATH" ]; then
-        echo "检测到已有密钥: $SSH_KEY_PATH"
-        read -p "使用现有密钥? [Y/n]: " use_existing
-        [[ "$use_existing" =~ ^[Nn]$ ]] && generate_ssh_key
-    else
-        generate_ssh_key
-    fi
-    
-    echo -e "\n需要将公钥复制到远程服务器"
-    read -s -p "请输入远程服务器密码 (仅用于复制公钥): " temp_pass
-    echo
-    
-    copy_ssh_key_to_remote "$temp_pass"
-    
-    if test_ssh_connection; then
-        echo -e "${GREEN}密钥认证配置成功！${NC}"
-    else
-        error "密钥认证失败"; exit 1
-    fi
-    
-    continue_setup
-}
-
-setup_password_auth() {
-    AUTH_METHOD="password"
-    read -s -p "请输入 SSH 密码: " REMOTE_PASS
-    echo
-    continue_setup
-}
-
-continue_setup() {
-    # 远程目录 - 自动创建以 VPS 名称命名的文件夹
-    read -p "请输入远程备份根目录 [/backup]: " REMOTE_BASE
-    REMOTE_BASE=${REMOTE_BASE:-/backup}
-    REMOTE_DIR="${REMOTE_BASE}/${VPS_NAME}"
-    
-    read -p "请输入本地快照目录 [/var/snapshots]: " LOCAL_DIR
-    LOCAL_DIR=${LOCAL_DIR:-/var/snapshots}
-    read -p "本地保留快照数量 [3]: " LOCAL_KEEP
-    LOCAL_KEEP=${LOCAL_KEEP:-3}
-    read -p "远程保留天数 [30]: " REMOTE_KEEP_DAYS
-    REMOTE_KEEP_DAYS=${REMOTE_KEEP_DAYS:-30}
-
-    # Telegram
-    read -p "是否启用 Telegram 通知? [y/N]: " ENABLE_TG
-    if [[ "$ENABLE_TG" =~ ^[Yy]$ ]]; then
-        read -p "请输入 Telegram Bot Token: " TG_BOT_TOKEN
-        read -p "请输入 Telegram Chat ID: " TG_CHAT_ID
-    fi
-
-    setup_backup_dirs
-}
-
-setup_backup_dirs() {
-    echo -e "\n${YELLOW}选择要备份的内容:${NC}"
-    echo "1) 完整系统 (排除临时文件)"
-    echo "2) 仅 /etc /home /root /var/www"
-    echo "3) 自定义目录"
-    read -p "请选择 [1]: " BACKUP_TYPE
-
-    case ${BACKUP_TYPE:-1} in
-        2) BACKUP_DIRS="/etc /home /root /var/www" ;;
-        3) read -p "请输入目录 (空格分隔): " BACKUP_DIRS ;;
-        *) BACKUP_DIRS="/" ;;
-    esac
-
-    save_config
-    
-    # 创建远程目录
-    log "创建远程目录: $REMOTE_DIR"
-    ssh_exec "mkdir -p $REMOTE_DIR"
 }
 
 save_config() {
-    log "保存配置到 $CONFIG_FILE"
+    log "保存配置..."
     cat > "$CONFIG_FILE" << CONF
 VPS_NAME="$VPS_NAME"
 AUTH_METHOD="$AUTH_METHOD"
@@ -233,13 +135,113 @@ CONF
     log "配置已保存"
 }
 
-load_config() {
-    [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE" || { error "未配置，请先运行: $0 setup"; return 1; }
+interactive_setup() {
+    print_banner
+    echo -e "${CYAN}=== 开始配置 ===${NC}\n"
+
+    read -p "VPS 名称 (用于区分备份): " VPS_NAME
+    VPS_NAME=${VPS_NAME:-$(hostname)}
+
+    read -p "远程服务器 IP: " REMOTE_IP
+    read -p "SSH 端口 [22]: " REMOTE_PORT
+    REMOTE_PORT=${REMOTE_PORT:-22}
+    read -p "SSH 用户名 [root]: " REMOTE_USER
+    REMOTE_USER=${REMOTE_USER:-root}
+
+    echo -e "\n${CYAN}认证方式:${NC}"
+    echo "1) SSH 密钥 (推荐)"
+    echo "2) 密码"
+    read -p "选择 [1]: " auth_choice
+
+    if [ "${auth_choice:-1}" = "1" ]; then
+        AUTH_METHOD="key"
+        REMOTE_PASS=""
+        [ ! -f "$SSH_KEY_PATH" ] && generate_ssh_key
+        echo ""
+        read -s -p "输入远程密码 (仅用于复制公钥): " temp_pass
+        echo ""
+        copy_ssh_key_to_remote "$temp_pass"
+        test_ssh_connection || exit 1
+    else
+        AUTH_METHOD="password"
+        read -s -p "SSH 密码: " REMOTE_PASS
+        echo ""
+    fi
+
+    read -p "远程备份根目录 [/backup]: " REMOTE_BASE
+    REMOTE_BASE=${REMOTE_BASE:-/backup}
+    REMOTE_DIR="${REMOTE_BASE}/${VPS_NAME}"
+
+    read -p "本地快照目录 [/var/snapshots]: " LOCAL_DIR
+    LOCAL_DIR=${LOCAL_DIR:-/var/snapshots}
+    
+    read -p "本地保留快照数 [3]: " LOCAL_KEEP
+    LOCAL_KEEP=${LOCAL_KEEP:-3}
+    
+    read -p "远程保留天数 [30]: " REMOTE_KEEP_DAYS
+    REMOTE_KEEP_DAYS=${REMOTE_KEEP_DAYS:-30}
+
+    read -p "启用 Telegram 通知? [y/N]: " enable_tg
+    if [[ "$enable_tg" =~ ^[Yy]$ ]]; then
+        read -p "Bot Token: " TG_BOT_TOKEN
+        read -p "Chat ID: " TG_CHAT_ID
+    fi
+
+    echo -e "\n${CYAN}备份内容:${NC}"
+    echo "1) 完整系统"
+    echo "2) 仅 /etc /home /root /var/www"
+    echo "3) 自定义"
+    read -p "选择 [1]: " backup_choice
+
+    case ${backup_choice:-1} in
+        2) BACKUP_DIRS="/etc /home /root /var/www" ;;
+        3) read -p "输入目录 (空格分隔): " BACKUP_DIRS ;;
+        *) BACKUP_DIRS="/" ;;
+    esac
+
+    save_config
+
+    log "创建远程目录: $REMOTE_DIR"
+    ssh_exec "mkdir -p $REMOTE_DIR"
+
+    echo -e "\n${GREEN}配置完成！${NC}"
 }
 
-#-------------------------------------------------------------------------------
-# 快照操作
-#-------------------------------------------------------------------------------
+edit_config() {
+    load_config || return 1
+
+    echo -e "\n${CYAN}=== 当前配置 ===${NC}"
+    echo "1) VPS名称: $VPS_NAME"
+    echo "2) 远程IP: $REMOTE_IP"
+    echo "3) 远程端口: $REMOTE_PORT"
+    echo "4) 远程用户: $REMOTE_USER"
+    echo "5) 远程目录: $REMOTE_DIR"
+    echo "6) 本地目录: $LOCAL_DIR"
+    echo "7) 本地保留: $LOCAL_KEEP 个"
+    echo "8) 远程保留: $REMOTE_KEEP_DAYS 天"
+    echo "9) Telegram: $([ -n "$TG_BOT_TOKEN" ] && echo '已配置' || echo '未配置')"
+    echo "0) 返回"
+
+    read -p "选择要修改的项: " choice
+    case $choice in
+        1) read -p "新VPS名称: " VPS_NAME; REMOTE_DIR="${REMOTE_BASE}/${VPS_NAME}" ;;
+        2) read -p "新远程IP: " REMOTE_IP ;;
+        3) read -p "新端口: " REMOTE_PORT ;;
+        4) read -p "新用户: " REMOTE_USER ;;
+        5) read -p "新远程目录: " REMOTE_DIR ;;
+        6) read -p "新本地目录: " LOCAL_DIR ;;
+        7) read -p "本地保留数: " LOCAL_KEEP ;;
+        8) read -p "远程保留天数: " REMOTE_KEEP_DAYS ;;
+        9) read -p "Bot Token: " TG_BOT_TOKEN; read -p "Chat ID: " TG_CHAT_ID ;;
+        0) return ;;
+    esac
+    save_config
+    echo -e "${GREEN}配置已更新${NC}"
+}
+
+#===============================================================================
+# 快照创建
+#===============================================================================
 
 create_snapshot() {
     local timestamp=$(date '+%Y%m%d_%H%M%S')
@@ -247,7 +249,7 @@ create_snapshot() {
     local snapshot_path="${LOCAL_DIR}/${snapshot_name}"
 
     mkdir -p "$LOCAL_DIR"
-    log "开始创建快照: $snapshot_name"
+    log "创建快照: $snapshot_name"
     send_telegram "🔄 <b>开始备份</b>%0AVPS: ${VPS_NAME}"
 
     local excludes="--exclude=/proc --exclude=/sys --exclude=/dev"
@@ -261,14 +263,15 @@ create_snapshot() {
         tar -czf "$snapshot_path" $BACKUP_DIRS 2>/dev/null || true
     fi
 
-    log "快照完成: $snapshot_path ($(du -h "$snapshot_path" | cut -f1))"
+    local size=$(du -h "$snapshot_path" | cut -f1)
+    log "快照完成: $snapshot_path ($size)"
     echo "$snapshot_path"
 }
 
 sync_to_remote() {
     local snapshot_path="$1"
-    log "同步到远程: $REMOTE_DIR"
-    
+    log "同步到远程..."
+
     if [ "$AUTH_METHOD" = "key" ]; then
         rsync -avz --progress -e "ssh -i $SSH_KEY_PATH -o StrictHostKeyChecking=no -p $REMOTE_PORT" \
             "$snapshot_path" "${REMOTE_USER}@${REMOTE_IP}:${REMOTE_DIR}/"
@@ -288,7 +291,7 @@ cleanup_local() {
 
 cleanup_remote() {
     log "清理远程 $REMOTE_KEEP_DAYS 天前的快照"
-    ssh_exec "find $REMOTE_DIR -name '*.tar.gz' -mtime +$REMOTE_KEEP_DAYS -delete" 2>/dev/null
+    ssh_exec "find $REMOTE_DIR -name '*.tar.gz' -mtime +$REMOTE_KEEP_DAYS -delete" 2>/dev/null || true
 }
 
 run_backup() {
@@ -307,33 +310,39 @@ run_backup() {
     send_telegram "✅ <b>备份完成</b>%0AVPS: ${VPS_NAME}%0A大小: ${size}%0A耗时: ${dur}秒"
 }
 
-#-------------------------------------------------------------------------------
+#===============================================================================
 # 快照列表
-#-------------------------------------------------------------------------------
+#===============================================================================
 
 list_local_snapshots() {
     echo -e "\n${CYAN}=== 本地快照 ===${NC}"
-    if [ -d "$LOCAL_DIR" ]; then
-        ls -lh "$LOCAL_DIR"/*.tar.gz 2>/dev/null | awk '{print NR") "$9" ("$5")"}'
+    if [ -d "$LOCAL_DIR" ] && ls "$LOCAL_DIR"/*.tar.gz &>/dev/null; then
+        ls -1t "$LOCAL_DIR"/*.tar.gz | nl -w2 -s') '
     else
-        echo "  (无)"
+        echo "  (无快照)"
     fi
 }
 
 list_remote_snapshots() {
     echo -e "\n${CYAN}=== 远程快照 [$VPS_NAME] ===${NC}"
-    ssh_exec "ls -lh $REMOTE_DIR/*.tar.gz 2>/dev/null" | awk '{print NR") "$9" ("$5")"}'
+    local list=$(ssh_exec "ls -1t $REMOTE_DIR/*.tar.gz 2>/dev/null")
+    if [ -n "$list" ]; then
+        echo "$list" | nl -w2 -s') '
+    else
+        echo "  (无快照)"
+    fi
 }
 
-#-------------------------------------------------------------------------------
-# 恢复快照
-#-------------------------------------------------------------------------------
+#===============================================================================
+# 快照恢复
+#===============================================================================
 
 select_restore_mode() {
-    echo -e "\n${YELLOW}选择恢复模式:${NC}"
-    echo "1) 覆盖模式 - 只覆盖快照中的文件（安全，保留新增文件）"
-    echo "2) 完整恢复 - 删除快照中不存在的文件（危险，恢复到干净状态）"
-    read -p "请选择 [1]: " mode
+    echo -e "\n${CYAN}=== 恢复模式 ===${NC}"
+    echo "1) 覆盖模式 - 只覆盖文件，保留新增文件 (安全)"
+    echo "2) 完整恢复 - 删除快照中不存在的文件 (危险!)"
+    echo ""
+    read -p "选择模式 [1]: " mode
     echo "${mode:-1}"
 }
 
@@ -341,19 +350,24 @@ do_restore() {
     local file="$1"
     local mode="$2"
     local temp_dir="/tmp/snapshot_restore_$$"
-    
-    log "解压快照到临时目录..."
+
+    log "解压快照..."
     mkdir -p "$temp_dir"
     tar -xzf "$file" -C "$temp_dir" 2>/dev/null
-    
+
     if [ "$mode" = "2" ]; then
-        log "完整恢复模式: 使用 rsync --delete"
-        echo -e "${RED}警告: 将删除系统中快照不存在的文件！${NC}"
-        echo -e "${RED}排除目录: /proc /sys /dev /run /tmp /mnt /media${NC}"
-        read -p "最后确认，输入 YES 继续: " final
-        [ "$final" != "YES" ] && { rm -rf "$temp_dir"; return 1; }
-        
-        # 完整恢复，删除快照中不存在的文件
+        echo -e "\n${RED}!!! 完整恢复模式 !!!${NC}"
+        echo -e "${RED}将删除系统中快照不存在的文件${NC}"
+        echo -e "${YELLOW}排除: /proc /sys /dev /run /tmp /mnt /media${NC}"
+        echo ""
+        read -p "输入 YES 确认: " confirm
+        if [ "$confirm" != "YES" ]; then
+            rm -rf "$temp_dir"
+            echo "已取消"
+            return 1
+        fi
+
+        log "完整恢复: rsync --delete"
         rsync -aAXv --delete \
             --exclude='/proc/*' \
             --exclude='/sys/*' \
@@ -367,47 +381,45 @@ do_restore() {
             --exclude="$temp_dir" \
             "$temp_dir/" /
     else
-        log "覆盖模式: 只覆盖已有文件"
+        log "覆盖恢复"
         rsync -aAXv "$temp_dir/" /
     fi
-    
+
     rm -rf "$temp_dir"
     log "恢复完成，建议重启系统"
 }
 
 restore_local() {
-    load_config || exit 1
+    load_config || return 1
     list_local_snapshots
-    
+
     echo ""
-    read -p "选择要恢复的快照编号: " num
+    read -p "选择快照编号: " num
     local file=$(ls -1t "$LOCAL_DIR"/*.tar.gz 2>/dev/null | sed -n "${num}p")
-    
     [ -z "$file" ] && { error "无效选择"; return 1; }
-    
+
     local mode=$(select_restore_mode)
-    
-    echo -e "${RED}警告: 即将恢复快照到系统！${NC}"
-    read -p "确认恢复 $file? [y/N]: " confirm
+
+    echo -e "\n${RED}警告: 即将恢复快照!${NC}"
+    read -p "确认? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
-    
+
     do_restore "$file" "$mode"
 }
 
 restore_from_remote() {
-    load_config || exit 1
+    load_config || return 1
     list_remote_snapshots
-    
+
     echo ""
-    read -p "选择要恢复的快照编号: " num
-    local file=$(ssh_exec "ls -1t $REMOTE_DIR/*.tar.gz" | sed -n "${num}p")
-    
+    read -p "选择快照编号: " num
+    local file=$(ssh_exec "ls -1t $REMOTE_DIR/*.tar.gz" 2>/dev/null | sed -n "${num}p")
     [ -z "$file" ] && { error "无效选择"; return 1; }
-    
-    log "下载远程快照: $file"
+
+    log "下载快照: $file"
     local local_file="$LOCAL_DIR/$(basename $file)"
     mkdir -p "$LOCAL_DIR"
-    
+
     if [ "$AUTH_METHOD" = "key" ]; then
         rsync -avz -e "ssh -i $SSH_KEY_PATH -p $REMOTE_PORT" \
             "${REMOTE_USER}@${REMOTE_IP}:${file}" "$local_file"
@@ -416,25 +428,25 @@ restore_from_remote() {
             -e "ssh -p $REMOTE_PORT" \
             "${REMOTE_USER}@${REMOTE_IP}:${file}" "$local_file"
     fi
-    
+
     local mode=$(select_restore_mode)
-    
-    echo -e "${RED}警告: 即将恢复快照！${NC}"
-    read -p "确认恢复? [y/N]: " confirm
+
+    echo -e "\n${RED}警告: 即将恢复快照!${NC}"
+    read -p "确认? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
-    
+
     do_restore "$local_file" "$mode"
 }
 
-restore_custom_remote() {
-    load_config || exit 1
-    
+restore_custom() {
+    load_config || return 1
+
     read -p "输入远程快照完整路径: " remote_file
     [ -z "$remote_file" ] && { error "路径不能为空"; return 1; }
-    
+
     local local_file="$LOCAL_DIR/$(basename $remote_file)"
     mkdir -p "$LOCAL_DIR"
-    
+
     log "下载: $remote_file"
     if [ "$AUTH_METHOD" = "key" ]; then
         rsync -avz -e "ssh -i $SSH_KEY_PATH -p $REMOTE_PORT" \
@@ -444,97 +456,70 @@ restore_custom_remote() {
             -e "ssh -p $REMOTE_PORT" \
             "${REMOTE_USER}@${REMOTE_IP}:${remote_file}" "$local_file"
     fi
-    
+
     local mode=$(select_restore_mode)
-    
-    echo -e "${RED}警告: 即将恢复!${NC}"
+
+    echo -e "\n${RED}警告: 即将恢复!${NC}"
     read -p "确认? [y/N]: " confirm
     [[ ! "$confirm" =~ ^[Yy]$ ]] && return
-    
+
     do_restore "$local_file" "$mode"
 }
 
-#-------------------------------------------------------------------------------
-# 配置管理
-#-------------------------------------------------------------------------------
-
-edit_config() {
-    load_config || exit 1
-    
-    echo -e "\n${CYAN}=== 当前配置 ===${NC}"
-    echo "1) VPS名称: $VPS_NAME"
-    echo "2) 远程IP: $REMOTE_IP"
-    echo "3) 远程端口: $REMOTE_PORT"
-    echo "4) 远程用户: $REMOTE_USER"
-    echo "5) 远程目录: $REMOTE_DIR"
-    echo "6) 本地目录: $LOCAL_DIR"
-    echo "7) 本地保留: $LOCAL_KEEP 个"
-    echo "8) 远程保留: $REMOTE_KEEP_DAYS 天"
-    echo "9) Telegram: $([ -n "$TG_BOT_TOKEN" ] && echo '已配置' || echo '未配置')"
-    echo "0) 返回"
-    
-    read -p "选择要修改的项: " choice
-    case $choice in
-        1) read -p "新VPS名称: " VPS_NAME; REMOTE_DIR="${REMOTE_BASE}/${VPS_NAME}" ;;
-        2) read -p "新远程IP: " REMOTE_IP ;;
-        3) read -p "新端口: " REMOTE_PORT ;;
-        4) read -p "新用户: " REMOTE_USER ;;
-        5) read -p "新远程目录: " REMOTE_DIR ;;
-        6) read -p "新本地目录: " LOCAL_DIR ;;
-        7) read -p "本地保留数: " LOCAL_KEEP ;;
-        8) read -p "远程保留天数: " REMOTE_KEEP_DAYS ;;
-        9) read -p "Bot Token: " TG_BOT_TOKEN; read -p "Chat ID: " TG_CHAT_ID ;;
-        0) return ;;
-    esac
-    save_config
-    echo -e "${GREEN}配置已更新${NC}"
-}
+#===============================================================================
+# 定时任务
+#===============================================================================
 
 setup_cron() {
-    echo -e "${YELLOW}设置定时备份${NC}"
+    echo -e "${CYAN}=== 定时备份 ===${NC}"
     echo "1) 每天凌晨 3 点"
     echo "2) 每 3 天凌晨 3 点"
     echo "3) 每周日凌晨 3 点"
     echo "4) 每月 1 号"
-    read -p "选择 [1]: " c
-    
-    case ${c:-1} in
+    read -p "选择 [1]: " choice
+
+    case ${choice:-1} in
         2) expr="0 3 */3 * *" ;;
         3) expr="0 3 * * 0" ;;
         4) expr="0 3 1 * *" ;;
         *) expr="0 3 * * *" ;;
     esac
 
-    local path=$(readlink -f "$0")
-    (crontab -l 2>/dev/null | grep -v "vps-snapshot"; echo "$expr $path run") | crontab -
-    log "定时任务: $expr"
+    local script_path=$(readlink -f "$0")
+    (crontab -l 2>/dev/null | grep -v "vps-snapshot"; echo "$expr $script_path run") | crontab -
+    log "定时任务已设置: $expr"
 }
+
+#===============================================================================
+# 状态显示
+#===============================================================================
 
 show_status() {
     print_banner
     if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
         echo -e "${GREEN}VPS: $VPS_NAME${NC}"
-        echo "认证: $AUTH_METHOD"
-        echo "远程: ${REMOTE_USER}@${REMOTE_IP}:${REMOTE_PORT}"
+        echo "认证方式: $AUTH_METHOD"
+        echo "远程服务器: ${REMOTE_USER}@${REMOTE_IP}:${REMOTE_PORT}"
         echo "远程目录: $REMOTE_DIR"
         echo "本地目录: $LOCAL_DIR"
-        echo "保留: 本地${LOCAL_KEEP}个 / 远程${REMOTE_KEEP_DAYS}天"
-        echo "TG: $([ -n "$TG_BOT_TOKEN" ] && echo '✓' || echo '✗')"
+        echo "保留策略: 本地 ${LOCAL_KEEP} 个 / 远程 ${REMOTE_KEEP_DAYS} 天"
+        echo "Telegram: $([ -n "$TG_BOT_TOKEN" ] && echo '已配置' || echo '未配置')"
         list_local_snapshots
     else
-        echo -e "${RED}未配置${NC}"
+        echo -e "${RED}未配置，请运行: $0 setup${NC}"
     fi
 }
 
-#-------------------------------------------------------------------------------
+#===============================================================================
 # 主菜单
-#-------------------------------------------------------------------------------
+#===============================================================================
 
 show_menu() {
     load_config 2>/dev/null
     print_banner
-    echo -e "${CYAN}VPS: ${VPS_NAME:-未配置}${NC}\n"
+    echo -e "${GREEN}VPS: ${VPS_NAME:-未配置}${NC}\n"
+
     echo "1) 创建快照并同步"
     echo "2) 仅创建本地快照"
     echo "3) 查看本地快照"
@@ -548,7 +533,7 @@ show_menu() {
     echo "0) 退出"
     echo ""
     read -p "请选择: " choice
-    
+
     case $choice in
         1) run_backup ;;
         2) load_config && create_snapshot ;;
@@ -556,14 +541,14 @@ show_menu() {
         4) load_config && list_remote_snapshots ;;
         5) restore_local ;;
         6) restore_from_remote ;;
-        7) restore_custom_remote ;;
+        7) restore_custom ;;
         8) edit_config ;;
         9) setup_cron ;;
         10) show_status ;;
         0) exit 0 ;;
         *) echo "无效选择" ;;
     esac
-    
+
     echo ""
     read -p "按回车继续..."
     show_menu
@@ -574,15 +559,19 @@ show_help() {
     echo "用法: $0 <命令>"
     echo ""
     echo "命令:"
-    echo "  setup    交互式配置"
+    echo "  setup    初始配置"
     echo "  run      创建快照并同步"
     echo "  menu     交互式菜单"
     echo "  list     查看快照"
-    echo "  restore  恢复快照"
+    echo "  restore  恢复本地快照"
     echo "  config   修改配置"
-    echo "  cron     设置定时"
+    echo "  cron     设置定时任务"
     echo "  status   查看状态"
 }
+
+#===============================================================================
+# 入口
+#===============================================================================
 
 main() {
     [ "$EUID" -ne 0 ] && { error "请用 root 运行"; exit 1; }
