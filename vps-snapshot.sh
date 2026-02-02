@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.12
+# VPS 快照备份脚本 v3.13
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.12                           ║"
+    echo "║           VPS 快照备份脚本 v3.13                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -739,22 +739,24 @@ do_full_restore() {
     # 删除快照后新增的 systemd 服务
     if [ -f "$tmp_dir/systemd-services.txt" ]; then
         log "清理新增的 systemd 服务..."
-        # 检查两个目录: /etc/systemd/system 和 /usr/lib/systemd/system
-        for svc_dir in /etc/systemd/system /usr/lib/systemd/system; do
-            for f in "$svc_dir"/*.service; do
-                [ -e "$f" ] || continue
-                local fname=$(basename "$f")
-                # 跳过系统核心服务
-                case "$fname" in
-                    systemd-*|dbus*|ssh*|cron*|rsyslog*|networking*) continue ;;
-                esac
-                if ! grep -qx "$fname" "$tmp_dir/systemd-services.txt" 2>/dev/null; then
-                    log "停止并删除服务: $fname"
-                    systemctl stop "$fname" 2>/dev/null || true
-                    systemctl disable "$fname" 2>/dev/null || true
-                    rm -f "$f"
-                fi
-            done
+        # 只清理用户安装的服务，不动系统服务
+        # 只检查 /etc/systemd/system (用户服务)，不检查 /usr/lib/systemd/system (系统服务)
+        for f in /etc/systemd/system/*.service; do
+            [ -e "$f" ] || continue
+            local fname=$(basename "$f")
+            # 跳过系统核心服务和模板服务
+            case "$fname" in
+                systemd-*|dbus*|ssh*|cron*|rsyslog*|networking*|getty*|serial-getty*) continue ;;
+                cloud-*|apt-*|apparmor*|console-*|keyboard-*|grub-*) continue ;;
+                docker*|containerd*|snap*|snapd*) continue ;;
+                *@*) continue ;;  # 跳过所有模板服务
+            esac
+            if ! grep -qx "$fname" "$tmp_dir/systemd-services.txt" 2>/dev/null; then
+                log "停止并删除服务: $fname"
+                systemctl stop "$fname" 2>/dev/null || true
+                systemctl disable "$fname" 2>/dev/null || true
+                rm -f "$f"
+            fi
         done
         systemctl daemon-reload 2>/dev/null || true
     fi
