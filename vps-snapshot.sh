@@ -601,19 +601,42 @@ do_restore_config_remote() {
     info "📡 从配置的远程服务器恢复: $REMOTE_IP:$remote_path"
     echo ""
     
-    # 列出远程快照
-    info "远程快照列表:"
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
+    # 获取远程快照列表
+    local snap_list=$(sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
         -p "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP" \
-        "ls -lh $remote_path/*.tar.gz 2>/dev/null" || { error "无远程快照"; return 1; }
+        "ls -t $remote_path/*.tar.gz 2>/dev/null")
+    
+    [ -z "$snap_list" ] && { error "无远程快照"; return 1; }
+    
+    # 显示编号列表
+    info "远程快照列表:"
+    local i=1
+    local snaps=()
+    while read -r snap; do
+        local name=$(basename "$snap")
+        local size=$(sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
+            -p "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP" \
+            "ls -lh '$snap' 2>/dev/null | awk '{print \$5}'" 2>/dev/null)
+        echo "  $i) $name ($size)"
+        snaps+=("$snap")
+        ((i++))
+    done <<< "$snap_list"
     
     echo ""
-    read -p "输入快照文件名: " snap_file
+    read -p "请选择 [1-$((i-1))]: " choice
     
-    log "下载快照..."
+    # 验证选择
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt $((i-1)) ]; then
+        error "无效选择"
+        return 1
+    fi
+    
+    local selected="${snaps[$((choice-1))]}"
+    
+    log "下载快照: $(basename "$selected")"
     local local_file="/tmp/remote_snapshot_$$.tar.gz"
     sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no \
-        -P "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP:$remote_path/$snap_file" "$local_file"
+        -P "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP:$selected" "$local_file"
     
     [ ! -f "$local_file" ] && { error "下载失败"; return 1; }
     
