@@ -700,7 +700,7 @@ show_menu() {
     echo "  2) 扫描已安装应用"
     echo "  3) 创建快照备份"
     echo "  4) 从本地快照恢复"
-    echo "  5) 从远程服务器恢复"
+    echo "  5) 自定义远程恢复 (输入任意服务器)"
     echo "  6) 一键迁移到新服务器"
     echo "  7) 导出 Docker 数据"
     echo "  8) 导入 Docker 数据"
