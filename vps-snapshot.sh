@@ -324,11 +324,13 @@ backup_app_data() {
     [ -d /home ] && backup_paths+=" /home"
     [ -d /root/.config ] && backup_paths+=" /root/.config"
     
-    # 打包
+    # 打包（排除快照目录）
+    local snap_dir="${LOCAL_DIR:-/var/snapshots}"
     if [ -n "$backup_paths" ]; then
         log "打包数据目录..."
         tar --exclude='*.sock' --exclude='*.pid' --exclude='node_modules' \
             --exclude='.npm' --exclude='.cache' --exclude='__pycache__' \
+            --exclude="$snap_dir" --exclude='/var/snapshots' \
             -czf "$backup_file" $backup_paths 2>/dev/null || true
         info "数据已保存: $backup_file"
     fi
