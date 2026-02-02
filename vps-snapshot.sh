@@ -698,18 +698,19 @@ show_menu() {
     echo ""
     echo "  1) 首次配置 / 重新配置"
     echo "  2) 扫描已安装应用"
-    echo "  3) 创建快照备份"
-    echo "  4) 从本地快照恢复"
-    echo "  5) 自定义远程恢复 (输入任意服务器)"
-    echo "  6) 一键迁移到新服务器"
-    echo "  7) 导出 Docker 数据"
-    echo "  8) 导入 Docker 数据"
-    echo "  9) 查看本地快照"
-    echo " 10) 同步到远程"
-    echo " 11) 安装依赖"
+    echo "  3) 创建本地快照"
+    echo "  4) 创建快照并同步远程"
+    echo "  5) 从本地快照恢复"
+    echo "  6) 自定义远程恢复 (输入任意服务器)"
+    echo "  7) 一键迁移到新服务器"
+    echo "  8) 导出 Docker 数据"
+    echo "  9) 导入 Docker 数据"
+    echo " 10) 查看本地快照"
+    echo " 11) 同步到远程"
+    echo " 12) 安装依赖"
     echo "  0) 退出"
     echo ""
-    read -p "请选择 [0-11]: " choice
+    read -p "请选择 [0-12]: " choice
     
     case $choice in
         1) do_setup ;;
@@ -718,24 +719,29 @@ show_menu() {
             load_config 2>/dev/null || true
             create_snapshot "${LOCAL_DIR:-/var/snapshots}" "${VPS_NAME:-snapshot}"
             ;;
-        4) do_restore_local ;;
-        5) do_restore_remote ;;
-        6) do_migrate ;;
-        7) 
+        4) 
+            load_config 2>/dev/null || true
+            create_snapshot "${LOCAL_DIR:-/var/snapshots}" "${VPS_NAME:-snapshot}"
+            do_sync_remote
+            ;;
+        5) do_restore_local ;;
+        6) do_restore_remote ;;
+        7) do_migrate ;;
+        8) 
             read -p "输出目录 [/var/snapshots]: " dir
             docker_export "${dir:-/var/snapshots}"
             ;;
-        8)
+        9)
             read -p "输入目录 [/var/snapshots]: " dir
             docker_import "${dir:-/var/snapshots}"
             ;;
-        9)
+        10)
             load_config 2>/dev/null || true
             echo ""
             ls -lh "${LOCAL_DIR:-/var/snapshots}" 2>/dev/null || echo "无快照"
             ;;
-        10) do_sync_remote ;;
-        11) install_deps ;;
+        11) do_sync_remote ;;
+        12) install_deps ;;
         0) exit 0 ;;
         *) error "无效选项" ;;
     esac
