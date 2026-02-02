@@ -394,12 +394,29 @@ do_restore() {
             --exclude='/mnt/*' \
             --exclude='/media/*' \
             --exclude='/lost+found' \
+            --exclude='/etc/ssh/*' \
+            --exclude='/root/.ssh/*' \
+            --exclude='/etc/shadow' \
+            --exclude='/etc/passwd' \
+            --exclude='/etc/hostname' \
+            --exclude='/etc/hosts' \
+            --exclude='/etc/network/*' \
+            --exclude='/etc/netplan/*' \
             --exclude="$LOCAL_DIR/*" \
             --exclude="$temp_dir" \
             "$temp_dir/" /
     else
         log "覆盖恢复"
-        rsync -aAXv "$temp_dir/" /
+        rsync -aAXv \
+            --exclude='/etc/ssh/*' \
+            --exclude='/root/.ssh/*' \
+            --exclude='/etc/shadow' \
+            --exclude='/etc/passwd' \
+            --exclude='/etc/hostname' \
+            --exclude='/etc/hosts' \
+            --exclude='/etc/network/*' \
+            --exclude='/etc/netplan/*' \
+            "$temp_dir/" /
     fi
 
     rm -rf "$temp_dir"
