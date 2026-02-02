@@ -538,11 +538,16 @@ create_snapshot() {
 cleanup_local() {
     local snap_dir="${LOCAL_DIR:-/var/snapshots}"
     local keep=${LOCAL_KEEP:-3}
+    local vps_name="${VPS_NAME:-snapshot}"
     
-    local count=$(ls -1 "$snap_dir"/*.tar.gz 2>/dev/null | wc -l)
+    # 删除临时的app-data文件
+    rm -f "$snap_dir"/app-data_*.tar.gz 2>/dev/null
+    
+    # 只统计VPS名称开头的快照
+    local count=$(ls -1 "$snap_dir"/${vps_name}_*.tar.gz 2>/dev/null | wc -l)
     if [ "$count" -gt "$keep" ]; then
         log "🧹 清理本地旧快照 (保留$keep个)..."
-        ls -t "$snap_dir"/*.tar.gz | tail -n +$((keep+1)) | xargs rm -f
+        ls -t "$snap_dir"/${vps_name}_*.tar.gz | tail -n +$((keep+1)) | xargs rm -f
     fi
 }
 
