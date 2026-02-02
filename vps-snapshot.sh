@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.8.6
+# VPS 快照备份脚本 v3.9.6
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.8                           ║"
+    echo "║           VPS 快照备份脚本 v3.9                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -699,13 +699,16 @@ do_full_restore() {
         systemctl daemon-reload 2>/dev/null || true
     fi
     
-    # 清理相关配置目录
+    # 清理相关配置和安装目录
     log "清理相关配置..."
     # sing-box 相关
     rm -rf /usr/local/etc/sing-box /etc/sing-box 2>/dev/null || true
+    # x-ui / x-panel 相关
+    rm -rf /usr/local/x-ui 2>/dev/null || true
     # 其他常见手动安装程序的配置
     rm -rf /usr/local/etc/v2ray /etc/v2ray 2>/dev/null || true
     rm -rf /usr/local/etc/xray /etc/xray 2>/dev/null || true
+    rm -rf /usr/local/xray 2>/dev/null || true
     
     # 停止并删除所有Docker容器
     if command -v docker &>/dev/null; then
