@@ -1257,6 +1257,23 @@ case "${1:-}" in
     migrate) do_migrate ;;
     docker-export) docker_export "${2:-/var/snapshots}" ;;
     docker-import) docker_import "${2:-/var/snapshots}" ;;
+    restore)
+        # 命令行恢复: restore <快照文件> [full|data]
+        load_config 2>/dev/null || true
+        local snap_file="${2:-}"
+        local mode="${3:-data}"
+        if [ -z "$snap_file" ]; then
+            error "用法: $0 restore <快照文件> [full|data]"
+            echo "  full = 完整恢复 (删除后来安装的软件)"
+            echo "  data = 仅恢复数据 (默认)"
+            exit 1
+        fi
+        [ ! -f "$snap_file" ] && { error "文件不存在: $snap_file"; exit 1; }
+        case "$mode" in
+            full) do_full_restore "$snap_file" ;;
+            data|*) do_data_restore "$snap_file" ;;
+        esac
+        ;;
     help|--help|-h)
         echo "用法: $0 [命令]"
         echo ""
@@ -1265,6 +1282,7 @@ case "${1:-}" in
         echo "  scan          扫描已安装应用"
         echo "  snapshot      创建本地快照"
         echo "  snapshot-sync 创建快照并同步远程"
+        echo "  restore       恢复快照 (restore <文件> [full|data])"
         echo "  migrate       一键迁移"
         echo "  docker-export 导出 Docker"
         echo "  docker-import 导入 Docker"
