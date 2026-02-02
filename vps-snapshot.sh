@@ -513,6 +513,9 @@ create_snapshot() {
     local size=$(du -h "$snapshot_file" | cut -f1)
     log "快照已创建: $snapshot_file ($size)"
     
+    # TG通知
+    send_tg "📸 *${VPS_NAME}* 快照完成\n大小: $size"
+    
     # 清理本地旧快照
     cleanup_local
     
@@ -744,6 +747,9 @@ do_sync_remote() {
     cleanup_remote
     
     log "✅ 同步完成"
+    
+    # TG通知
+    send_tg "📤 *${VPS_NAME}* 同步完成\n远程: $REMOTE_IP:$remote_path"
 }
 
 #===============================================================================
@@ -755,6 +761,70 @@ send_tg() {
     local msg="$1"
     curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
         -d chat_id="$TG_CHAT_ID" -d text="$msg" -d parse_mode="Markdown" > /dev/null
+}
+
+#===============================================================================
+# 定时快照
+#===============================================================================
+
+setup_cron() {
+    local script_path=$(readlink -f "$0")
+    
+    echo ""
+    info "⏰ 设置定时快照"
+    echo ""
+    echo "  1) 每天一次"
+    echo "  2) 每12小时"
+    echo "  3) 每6小时"
+    echo "  4) 每小时"
+    echo "  5) 自定义cron表达式"
+    echo "  6) 查看当前定时任务"
+    echo "  7) 删除定时任务"
+    echo "  0) 返回"
+    echo ""
+    read -p "请选择: " cron_choice
+    
+    local cron_expr=""
+    case $cron_choice in
+        1) cron_expr="0 2 * * *" ;;
+        2) cron_expr="0 */12 * * *" ;;
+        3) cron_expr="0 */6 * * *" ;;
+        4) cron_expr="0 * * * *" ;;
+        5) read -p "输入cron表达式: " cron_expr ;;
+        6) 
+            echo ""
+            crontab -l 2>/dev/null | grep -E "vps-snapshot|快照" || echo "无定时任务"
+            return
+            ;;
+        7)
+            crontab -l 2>/dev/null | grep -v "vps-snapshot" | crontab -
+            log "定时任务已删除"
+            return
+            ;;
+        0) return ;;
+        *) error "无效选项"; return ;;
+    esac
+    
+    [ -z "$cron_expr" ] && return
+    
+    # 选择快照类型
+    echo ""
+    echo "  1) 仅本地快照"
+    echo "  2) 快照并同步远程"
+    read -p "请选择: " snap_type
+    
+    local cmd=""
+    case $snap_type in
+        1) cmd="$script_path snapshot" ;;
+        2) cmd="$script_path snapshot-sync" ;;
+        *) error "无效选项"; return ;;
+    esac
+    
+    # 添加到crontab
+    (crontab -l 2>/dev/null | grep -v "vps-snapshot"; echo "$cron_expr $cmd # vps-snapshot") | crontab -
+    
+    log "✅ 定时任务已设置: $cron_expr"
+    send_tg "⏰ *${VPS_NAME}* 定时快照已设置\n$cron_expr"
 }
 
 #===============================================================================
@@ -846,10 +916,11 @@ show_menu() {
     echo " 10) 导入 Docker 数据"
     echo " 11) 查看本地快照"
     echo " 12) 同步到远程"
-    echo " 13) 安装依赖"
+    echo " 13) 设置定时快照"
+    echo " 14) 安装依赖"
     echo "  0) 退出"
     echo ""
-    read -p "请选择 [0-13]: " choice
+    read -p "请选择 [0-14]: " choice
     
     case $choice in
         1) do_setup ;;
@@ -881,7 +952,8 @@ show_menu() {
             ls -lh "${LOCAL_DIR:-/var/snapshots}" 2>/dev/null || echo "无快照"
             ;;
         12) do_sync_remote ;;
-        13) install_deps ;;
+        13) setup_cron ;;
+        14) install_deps ;;
         0) exit 0 ;;
         *) error "无效选项" ;;
     esac
@@ -898,7 +970,15 @@ show_menu() {
 case "${1:-}" in
     setup) do_setup ;;
     scan) detect_apps ;;
-    snapshot) create_snapshot "${2:-/var/snapshots}" "${3:-snapshot}" ;;
+    snapshot) 
+        load_config 2>/dev/null || true
+        create_snapshot "${LOCAL_DIR:-/var/snapshots}" "${VPS_NAME:-snapshot}" 
+        ;;
+    snapshot-sync)
+        load_config 2>/dev/null || true
+        create_snapshot "${LOCAL_DIR:-/var/snapshots}" "${VPS_NAME:-snapshot}"
+        do_sync_remote
+        ;;
     migrate) do_migrate ;;
     docker-export) docker_export "${2:-/var/snapshots}" ;;
     docker-import) docker_import "${2:-/var/snapshots}" ;;
@@ -908,7 +988,8 @@ case "${1:-}" in
         echo "命令:"
         echo "  setup         配置向导"
         echo "  scan          扫描已安装应用"
-        echo "  snapshot      创建快照"
+        echo "  snapshot      创建本地快照"
+        echo "  snapshot-sync 创建快照并同步远程"
         echo "  migrate       一键迁移"
         echo "  docker-export 导出 Docker"
         echo "  docker-import 导入 Docker"
