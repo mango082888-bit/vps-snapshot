@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.6.6
+# VPS 快照备份脚本 v3.7.6
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.6                           ║"
+    echo "║           VPS 快照备份脚本 v3.7                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -498,10 +498,19 @@ create_snapshot() {
     # 检测应用并备份
     detect_apps > /dev/null
     
-    # Docker 数据
     # Docker 数据 - 导出到临时目录
     local tmp_dir="/tmp/snapshot_$$"
     mkdir -p "$tmp_dir"
+    
+    # 保存已安装包列表（用于完整恢复）
+    log "保存系统包列表..."
+    if command -v dpkg &>/dev/null; then
+        dpkg --get-selections | grep -v deinstall | awk '{print $1}' > "$tmp_dir/installed-packages.txt"
+    elif command -v rpm &>/dev/null; then
+        rpm -qa --qf '%{NAME}\n' > "$tmp_dir/installed-packages.txt"
+    elif command -v apk &>/dev/null; then
+        apk list -I 2>/dev/null | awk -F' ' '{print $1}' | sed 's/-[0-9].*//' > "$tmp_dir/installed-packages.txt"
+    fi
     
     if command -v docker &>/dev/null && docker info &>/dev/null; then
         docker_export "$tmp_dir"
@@ -579,12 +588,118 @@ do_restore_local() {
     
     [ ! -f "$snap_dir/$snap_file" ] && { error "文件不存在"; return 1; }
     
-    log "🔄 恢复快照: $snap_file"
+    # 选择恢复模式
+    echo ""
+    info "选择恢复模式:"
+    echo "  1) 完整恢复 (恢复到快照时状态，删除后来安装的软件)"
+    echo "  2) 仅恢复数据 (只恢复Docker和应用数据，保留现有系统)"
+    echo ""
+    read -p "请选择 [1-2]: " restore_mode
+    
+    case "$restore_mode" in
+        1) do_full_restore "$snap_dir/$snap_file" ;;
+        2) do_data_restore "$snap_dir/$snap_file" ;;
+        *) error "无效选择"; return 1 ;;
+    esac
+}
+
+# 完整恢复 - 恢复到快照时的完整状态
+do_full_restore() {
+    local snap_file="$1"
+    log "🔄 完整恢复: $(basename $snap_file)"
     
     # 解压到临时目录
     local tmp_dir="/tmp/restore_$$"
     mkdir -p "$tmp_dir"
-    tar -xzf "$snap_dir/$snap_file" -C "$tmp_dir"
+    tar -xzf "$snap_file" -C "$tmp_dir"
+    
+    # 读取快照时的已安装包列表
+    if [ -f "$tmp_dir/installed-packages.txt" ]; then
+        log "恢复系统包状态..."
+        
+        # 获取当前已安装的包
+        local current_pkgs="/tmp/current_pkgs_$$.txt"
+        if command -v dpkg &>/dev/null; then
+            dpkg --get-selections | grep -v deinstall | awk '{print $1}' > "$current_pkgs"
+        elif command -v rpm &>/dev/null; then
+            rpm -qa --qf '%{NAME}\n' > "$current_pkgs"
+        elif command -v apk &>/dev/null; then
+            apk list -I 2>/dev/null | awk -F' ' '{print $1}' | sed 's/-[0-9].*//' > "$current_pkgs"
+        fi
+        
+        # 找出快照后新安装的包
+        if [ -f "$current_pkgs" ]; then
+            local new_pkgs=$(comm -23 <(sort "$current_pkgs") <(sort "$tmp_dir/installed-packages.txt"))
+            if [ -n "$new_pkgs" ]; then
+                log "删除快照后安装的软件包..."
+                echo "$new_pkgs" | head -20
+                [ $(echo "$new_pkgs" | wc -l) -gt 20 ] && echo "... 等共 $(echo "$new_pkgs" | wc -l) 个包"
+                
+                if command -v apt-get &>/dev/null; then
+                    echo "$new_pkgs" | xargs apt-get purge -y --auto-remove 2>/dev/null || true
+                elif command -v yum &>/dev/null; then
+                    echo "$new_pkgs" | xargs yum remove -y 2>/dev/null || true
+                elif command -v apk &>/dev/null; then
+                    echo "$new_pkgs" | xargs apk del 2>/dev/null || true
+                fi
+            fi
+            rm -f "$current_pkgs"
+        fi
+    fi
+    
+    # 停止并删除所有Docker容器
+    if command -v docker &>/dev/null; then
+        log "清理现有 Docker 环境..."
+        docker stop $(docker ps -aq) 2>/dev/null || true
+        docker rm $(docker ps -aq) 2>/dev/null || true
+        docker system prune -af 2>/dev/null || true
+    fi
+    
+    # 导入Docker镜像
+    if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
+        log "导入 Docker 镜像..."
+        gunzip -c "$tmp_dir/docker-images.tar.gz" | docker load
+    fi
+    
+    # 恢复Docker volumes
+    if [ -f "$tmp_dir/docker-volumes.tar.gz" ]; then
+        log "恢复 Docker Volumes..."
+        tar -xzf "$tmp_dir/docker-volumes.tar.gz" -C /var/lib/docker/volumes/ 2>/dev/null || true
+    fi
+    
+    # 恢复docker-compose文件
+    if [ -f "$tmp_dir/docker-compose.yml" ]; then
+        cp "$tmp_dir/docker-compose.yml" /root/
+    fi
+    if [ -f "$tmp_dir/.env" ]; then
+        cp "$tmp_dir/.env" /root/
+    fi
+    
+    # 恢复应用数据
+    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+        log "恢复应用数据..."
+        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+    fi
+    
+    # 启动Docker容器
+    if [ -f /root/docker-compose.yml ]; then
+        log "启动 Docker 容器..."
+        cd /root && docker compose up -d 2>/dev/null || docker-compose up -d 2>/dev/null || true
+    fi
+    
+    rm -rf "$tmp_dir"
+    log "✅ 完整恢复完成"
+}
+
+# 仅恢复数据 - 保留现有系统
+do_data_restore() {
+    local snap_file="$1"
+    log "🔄 恢复数据: $(basename $snap_file)"
+    
+    # 解压到临时目录
+    local tmp_dir="/tmp/restore_$$"
+    mkdir -p "$tmp_dir"
+    tar -xzf "$snap_file" -C "$tmp_dir"
     
     # 导入Docker
     if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
@@ -599,7 +714,7 @@ do_restore_local() {
     fi
     
     rm -rf "$tmp_dir"
-    log "✅ 恢复完成"
+    log "✅ 数据恢复完成"
 }
 
 #===============================================================================
