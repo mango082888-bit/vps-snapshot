@@ -739,15 +739,22 @@ do_full_restore() {
     # 删除快照后新增的 systemd 服务
     if [ -f "$tmp_dir/systemd-services.txt" ]; then
         log "清理新增的 systemd 服务..."
-        for f in /etc/systemd/system/*.service; do
-            [ -e "$f" ] || continue
-            local fname=$(basename "$f")
-            if ! grep -qx "$fname" "$tmp_dir/systemd-services.txt" 2>/dev/null; then
-                log "停止并删除服务: $fname"
-                systemctl stop "$fname" 2>/dev/null || true
-                systemctl disable "$fname" 2>/dev/null || true
-                rm -f "$f"
-            fi
+        # 检查两个目录: /etc/systemd/system 和 /usr/lib/systemd/system
+        for svc_dir in /etc/systemd/system /usr/lib/systemd/system; do
+            for f in "$svc_dir"/*.service; do
+                [ -e "$f" ] || continue
+                local fname=$(basename "$f")
+                # 跳过系统核心服务
+                case "$fname" in
+                    systemd-*|dbus*|ssh*|cron*|rsyslog*|networking*) continue ;;
+                esac
+                if ! grep -qx "$fname" "$tmp_dir/systemd-services.txt" 2>/dev/null; then
+                    log "停止并删除服务: $fname"
+                    systemctl stop "$fname" 2>/dev/null || true
+                    systemctl disable "$fname" 2>/dev/null || true
+                    rm -f "$f"
+                fi
+            done
         done
         systemctl daemon-reload 2>/dev/null || true
     fi
@@ -1260,18 +1267,18 @@ case "${1:-}" in
     restore)
         # 命令行恢复: restore <快照文件> [full|data]
         load_config 2>/dev/null || true
-        local snap_file="${2:-}"
-        local mode="${3:-data}"
-        if [ -z "$snap_file" ]; then
+        _snap_file="${2:-}"
+        _mode="${3:-data}"
+        if [ -z "$_snap_file" ]; then
             error "用法: $0 restore <快照文件> [full|data]"
             echo "  full = 完整恢复 (删除后来安装的软件)"
             echo "  data = 仅恢复数据 (默认)"
             exit 1
         fi
-        [ ! -f "$snap_file" ] && { error "文件不存在: $snap_file"; exit 1; }
-        case "$mode" in
-            full) do_full_restore "$snap_file" ;;
-            data|*) do_data_restore "$snap_file" ;;
+        [ ! -f "$_snap_file" ] && { error "文件不存在: $_snap_file"; exit 1; }
+        case "$_mode" in
+            full) do_full_restore "$_snap_file" ;;
+            data|*) do_data_restore "$_snap_file" ;;
         esac
         ;;
     help|--help|-h)
