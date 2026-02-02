@@ -258,6 +258,7 @@ create_snapshot() {
     excludes+=" --exclude=/etc/ssh --exclude=/root/.ssh"
     excludes+=" --exclude=/etc/shadow --exclude=/etc/passwd"
     excludes+=" --exclude=/etc/hostname --exclude=/etc/hosts"
+    excludes+=" --exclude=/etc/pam.d"
 
     if [ "$BACKUP_DIRS" = "/" ]; then
         tar $excludes -czf "$snapshot_path" / 2>/dev/null || true
