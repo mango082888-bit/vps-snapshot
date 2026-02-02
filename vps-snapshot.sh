@@ -498,7 +498,37 @@ create_snapshot() {
     
     local size=$(du -h "$snapshot_file" | cut -f1)
     log "快照已创建: $snapshot_file ($size)"
+    
+    # 清理本地旧快照
+    cleanup_local
+    
     echo "$snapshot_file"
+}
+
+#===============================================================================
+# 清理旧快照
+#===============================================================================
+
+cleanup_local() {
+    local snap_dir="${LOCAL_DIR:-/var/snapshots}"
+    local keep=${LOCAL_KEEP:-3}
+    
+    local count=$(ls -1 "$snap_dir"/*.tar.gz 2>/dev/null | wc -l)
+    if [ "$count" -gt "$keep" ]; then
+        log "🧹 清理本地旧快照 (保留$keep个)..."
+        ls -t "$snap_dir"/*.tar.gz | tail -n +$((keep+1)) | xargs rm -f
+    fi
+}
+
+cleanup_remote() {
+    [ -z "$REMOTE_IP" ] && return
+    local days=${REMOTE_KEEP_DAYS:-30}
+    local remote_path="${REMOTE_DIR:-/backup}/${VPS_NAME:-$(hostname)}"
+    
+    log "🧹 清理远程旧快照 (保留${days}天)..."
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
+        -p "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP" \
+        "find $remote_path -name '*.tar.gz' -mtime +$days -delete 2>/dev/null" || true
 }
 
 #===============================================================================
@@ -619,6 +649,9 @@ do_sync_remote() {
         -e "ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT:-22}" \
         "$latest" "${REMOTE_USER:-root}@$REMOTE_IP:$remote_path/"
     
+    # 清理远程旧快照
+    cleanup_remote
+    
     log "✅ 同步完成"
 }
 
@@ -644,14 +677,16 @@ load_config() {
 save_config() {
     cat > "$CONFIG_FILE" << EOF
 VPS_NAME="$VPS_NAME"
-TG_BOT_TOKEN="$TG_BOT_TOKEN"
-TG_CHAT_ID="$TG_CHAT_ID"
+LOCAL_DIR="$LOCAL_DIR"
+LOCAL_KEEP="$LOCAL_KEEP"
 REMOTE_IP="$REMOTE_IP"
 REMOTE_PORT="$REMOTE_PORT"
 REMOTE_USER="$REMOTE_USER"
 REMOTE_PASS="$REMOTE_PASS"
 REMOTE_DIR="$REMOTE_DIR"
-LOCAL_DIR="$LOCAL_DIR"
+REMOTE_KEEP_DAYS="$REMOTE_KEEP_DAYS"
+TG_BOT_TOKEN="$TG_BOT_TOKEN"
+TG_CHAT_ID="$TG_CHAT_ID"
 EOF
     chmod 600 "$CONFIG_FILE"
 }
@@ -667,6 +702,9 @@ do_setup() {
     read -p "本地快照目录 [/var/snapshots]: " LOCAL_DIR
     LOCAL_DIR=${LOCAL_DIR:-/var/snapshots}
     
+    read -p "本地保留快照数量 [3]: " LOCAL_KEEP
+    LOCAL_KEEP=${LOCAL_KEEP:-3}
+    
     echo ""
     info "远程备份配置 (可选，留空跳过)"
     read -p "远程服务器 IP: " REMOTE_IP
@@ -677,8 +715,10 @@ do_setup() {
         REMOTE_USER=${REMOTE_USER:-root}
         read -s -p "远程密码: " REMOTE_PASS
         echo ""
-        read -p "远程目录 [/backup/$VPS_NAME]: " REMOTE_DIR
-        REMOTE_DIR=${REMOTE_DIR:-/backup/$VPS_NAME}
+        read -p "远程目录 [/backup]: " REMOTE_DIR
+        REMOTE_DIR=${REMOTE_DIR:-/backup}
+        read -p "远程保留天数 [30]: " REMOTE_KEEP_DAYS
+        REMOTE_KEEP_DAYS=${REMOTE_KEEP_DAYS:-30}
     fi
     
     echo ""
