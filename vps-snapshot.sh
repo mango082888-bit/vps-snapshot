@@ -264,8 +264,6 @@ docker_import() {
 
 backup_app_data() {
     local output_dir="${1:-/var/snapshots}"
-    local timestamp=$(date '+%Y%m%d_%H%M%S')
-    local backup_file="$output_dir/app-data_${timestamp}.tar.gz"
     
     mkdir -p "$output_dir"
     log "📦 备份应用数据..."
@@ -343,11 +341,9 @@ backup_app_data() {
         tar --exclude='*.sock' --exclude='*.pid' --exclude='node_modules' \
             --exclude='.npm' --exclude='.cache' --exclude='__pycache__' \
             --exclude="$snap_dir" --exclude='/var/snapshots' \
-            -czf "$backup_file" $backup_paths 2>/dev/null || true
-        info "数据已保存: $backup_file"
+            -czf "$output_dir/app-data.tar.gz" $backup_paths 2>/dev/null || true
+        info "数据已保存: $output_dir/app-data.tar.gz"
     fi
-    
-    echo "$backup_file"
 }
 
 #===============================================================================
