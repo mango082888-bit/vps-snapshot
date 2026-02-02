@@ -514,7 +514,17 @@ create_snapshot() {
     log "快照已创建: $snapshot_file ($size)"
     
     # TG通知
-    send_tg "📸 *${VPS_NAME}* 快照完成\n大小: $size"
+    local snap_count=$(ls -1 "${LOCAL_DIR:-/var/snapshots}"/*.tar.gz 2>/dev/null | wc -l)
+    local remote_path="${REMOTE_DIR:-/backup}/${VPS_NAME:-$(hostname)}"
+    local tg_msg="🔄 *系统快照操作完成*
+📍 *${VPS_NAME}*
+⏱️ 完成时间: $(date '+%Y-%m-%d %H:%M:%S')
+💾 快照大小: $size
+📂 本地快照: ${snap_count}个
+☁️ 远程保留: ${REMOTE_KEEP_DAYS:-30}天
+💾 本地路径: ${LOCAL_DIR:-/var/snapshots}
+📁 远程路径: ${remote_path}"
+    send_tg "$tg_msg"
     
     # 清理本地旧快照
     cleanup_local
@@ -747,9 +757,6 @@ do_sync_remote() {
     cleanup_remote
     
     log "✅ 同步完成"
-    
-    # TG通知
-    send_tg "📤 *${VPS_NAME}* 同步完成\n远程: $REMOTE_IP:$remote_path"
 }
 
 #===============================================================================
