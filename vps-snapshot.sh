@@ -509,12 +509,13 @@ create_snapshot() {
     # 应用数据
     backup_app_data "$output_dir"
     
-    # 打包（排除已有快照文件）
-    tar --exclude="*.tar.gz" -czf "$snapshot_file" -C "$output_dir" . 2>/dev/null || true
+    # 打包（只排除已有的VPS快照文件，不排除docker和app-data）
+    tar --exclude="${name}_*.tar.gz" -czf "$snapshot_file" -C "$output_dir" . 2>/dev/null || true
     
     # 清理临时文件
     rm -rf "$output_dir/docker_$timestamp" "$output_dir/mysql" "$output_dir/postgresql" "$output_dir/mongodb"
     rm -f "$output_dir"/app-data_*.tar.gz 2>/dev/null
+    rm -f "$output_dir"/docker-images.tar.gz 2>/dev/null
     
     local size=$(du -h "$snapshot_file" | cut -f1)
     log "快照已创建: $snapshot_file ($size)"
