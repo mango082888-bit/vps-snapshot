@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.10.6
+# VPS 快照备份脚本 v3.11
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -271,9 +271,50 @@ backup_app_data() {
     
     local backup_paths=""
     
+    #---------------------------------------------------------------------------
+    # 智能扫描系统目录（自动识别有数据的目录）
+    #---------------------------------------------------------------------------
+    log "🔍 智能扫描系统目录..."
+    
+    # 核心配置目录 - 必备
+    [ -d /etc ] && backup_paths+=" /etc"
+    
+    # 用户目录
+    [ -d /root ] && backup_paths+=" /root"
+    [ -d /home ] && [ "$(ls -A /home 2>/dev/null)" ] && backup_paths+=" /home"
+    
+    # 手动安装的程序和数据
+    [ -d /usr/local/bin ] && [ "$(ls -A /usr/local/bin 2>/dev/null)" ] && backup_paths+=" /usr/local/bin"
+    [ -d /usr/local/sbin ] && [ "$(ls -A /usr/local/sbin 2>/dev/null)" ] && backup_paths+=" /usr/local/sbin"
+    [ -d /usr/local/etc ] && [ "$(ls -A /usr/local/etc 2>/dev/null)" ] && backup_paths+=" /usr/local/etc"
+    
+    # /opt 应用目录（排除 containerd）
+    if [ -d /opt ]; then
+        for dir in /opt/*/; do
+            [ -d "$dir" ] || continue
+            local dirname=$(basename "$dir")
+            # 跳过 containerd（Docker 内部数据）
+            [ "$dirname" = "containerd" ] && continue
+            backup_paths+=" $dir"
+        done
+    fi
+    
+    # /var/www 网站目录
+    [ -d /var/www ] && [ "$(ls -A /var/www 2>/dev/null)" ] && backup_paths+=" /var/www"
+    
+    # 显示扫描结果
+    log "📋 将备份以下目录:"
+    for p in $backup_paths; do
+        local size=$(du -sh "$p" 2>/dev/null | cut -f1)
+        echo "    $p ($size)"
+    done
+    
+    #---------------------------------------------------------------------------
+    # 特定应用数据导出（数据库等需要特殊处理）
+    #---------------------------------------------------------------------------
+    
     # Nginx
-    [ -d /etc/nginx ] && backup_paths+=" /etc/nginx"
-    [ -d /var/www ] && backup_paths+=" /var/www"
+    [ -d /etc/nginx ] && log "  ✓ Nginx 配置"
     
     # MySQL
     if [ -d /var/lib/mysql ]; then
@@ -325,25 +366,24 @@ backup_app_data() {
     fi
     
     # 1Panel
-    [ -d /opt/1panel ] && backup_paths+=" /opt/1panel"
+    [ -d /opt/1panel ] && log "  ✓ 1Panel"
     
     # 宝塔
-    [ -d /www ] && backup_paths+=" /www"
+    [ -d /www ] && backup_paths+=" /www" && log "  ✓ 宝塔面板"
     
-    # 通用数据目录
-    [ -d /opt ] && backup_paths+=" /opt"
-    [ -d /home ] && backup_paths+=" /home"
-    [ -d /root/.config ] && backup_paths+=" /root/.config"
-    
-    # 打包（排除快照目录）
+    # 打包（排除快照目录和无用文件）
     local snap_dir="${LOCAL_DIR:-/var/snapshots}"
     if [ -n "$backup_paths" ]; then
-        log "打包数据目录..."
+        log "📦 打包数据目录..."
         tar --exclude='*.sock' --exclude='*.pid' --exclude='node_modules' \
             --exclude='.npm' --exclude='.cache' --exclude='__pycache__' \
+            --exclude='*.log' --exclude='/var/log/*' \
+            --exclude='/var/cache/*' --exclude='/tmp/*' \
             --exclude="$snap_dir" --exclude='/var/snapshots' \
+            --exclude='/root/.cache' --exclude='/root/.local/share/Trash' \
             -czf "$output_dir/app-data.tar.gz" $backup_paths 2>/dev/null || true
-        info "数据已保存: $output_dir/app-data.tar.gz"
+        local data_size=$(du -h "$output_dir/app-data.tar.gz" 2>/dev/null | cut -f1)
+        info "数据已保存: $output_dir/app-data.tar.gz ($data_size)"
     fi
 }
 
