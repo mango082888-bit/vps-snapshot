@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.9.6
+# VPS 快照备份脚本 v3.10.6
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.9                           ║"
+    echo "║           VPS 快照备份脚本 v3.10                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -955,8 +955,10 @@ do_sync_remote() {
 send_tg() {
     [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ] && return
     local msg="$1"
+    # 转义 Markdown 特殊字符
+    msg=$(echo "$msg" | sed 's/_/\\_/g')
     curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-        -d chat_id="$TG_CHAT_ID" -d text="$msg" -d parse_mode="Markdown" > /dev/null
+        -d chat_id="$TG_CHAT_ID" -d text="$msg" -d parse_mode="Markdown" > /dev/null 2>&1 || true
 }
 
 #===============================================================================
