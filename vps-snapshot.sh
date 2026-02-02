@@ -51,6 +51,18 @@ install_deps() {
     esac
 }
 
+check_deps() {
+    local missing=""
+    command -v rsync &>/dev/null || missing+=" rsync"
+    command -v sshpass &>/dev/null || missing+=" sshpass"
+    command -v jq &>/dev/null || missing+=" jq"
+    
+    if [ -n "$missing" ]; then
+        warn "缺少依赖:$missing，正在安装..."
+        install_deps
+    fi
+}
+
 #===============================================================================
 # 智能识别应用
 #===============================================================================
@@ -737,6 +749,9 @@ do_setup() {
 #===============================================================================
 
 show_menu() {
+    # 自动检测并安装依赖
+    check_deps
+    
     print_banner
     load_config 2>/dev/null || true
     
