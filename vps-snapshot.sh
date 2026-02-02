@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.13
+# VPS 快照备份脚本 v3.14
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.13                           ║"
+    echo "║           VPS 快照备份脚本 v3.14                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -826,10 +826,23 @@ do_data_restore() {
     mkdir -p "$tmp_dir"
     tar -xzf "$snap_file" -C "$tmp_dir"
     
-    # 导入Docker
+    # 导入Docker镜像
     if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
         log "导入 Docker 镜像..."
         gunzip -c "$tmp_dir/docker-images.tar.gz" | docker load
+    fi
+    
+    # 恢复 Docker Volumes
+    if [ -d "$tmp_dir/volumes" ]; then
+        log "恢复 Docker Volumes..."
+        for vol_file in "$tmp_dir/volumes"/*.tar.gz; do
+            [ -f "$vol_file" ] || continue
+            local vol_name=$(basename "$vol_file" .tar.gz)
+            docker volume create "$vol_name" 2>/dev/null || true
+            docker run --rm -v "$vol_name:/data" -v "$tmp_dir/volumes:/backup" \
+                alpine sh -c "cd /data && tar -xzf /backup/$(basename $vol_file)"
+            log "  恢复 Volume: $vol_name"
+        done
     fi
     
     # 恢复应用数据
