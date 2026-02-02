@@ -502,6 +502,123 @@ create_snapshot() {
 }
 
 #===============================================================================
+# 本地恢复
+#===============================================================================
+
+do_restore_local() {
+    load_config 2>/dev/null || true
+    local snap_dir="${LOCAL_DIR:-/var/snapshots}"
+    
+    echo ""
+    info "📂 本地快照列表:"
+    ls -lh "$snap_dir"/*.tar.gz 2>/dev/null || { error "无快照"; return 1; }
+    echo ""
+    read -p "输入快照文件名: " snap_file
+    
+    [ ! -f "$snap_dir/$snap_file" ] && { error "文件不存在"; return 1; }
+    
+    log "🔄 恢复快照: $snap_file"
+    
+    # 解压到临时目录
+    local tmp_dir="/tmp/restore_$$"
+    mkdir -p "$tmp_dir"
+    tar -xzf "$snap_dir/$snap_file" -C "$tmp_dir"
+    
+    # 导入Docker
+    if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
+        log "导入 Docker 镜像..."
+        gunzip -c "$tmp_dir/docker-images.tar.gz" | docker load
+    fi
+    
+    # 恢复应用数据
+    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+        log "恢复应用数据..."
+        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+    fi
+    
+    rm -rf "$tmp_dir"
+    log "✅ 恢复完成"
+}
+
+#===============================================================================
+# 远程恢复
+#===============================================================================
+
+do_restore_remote() {
+    echo ""
+    info "📡 从远程服务器拉取快照"
+    read -p "远程服务器 IP: " remote_ip
+    read -p "远程端口 [22]: " remote_port
+    remote_port=${remote_port:-22}
+    read -p "远程用户 [root]: " remote_user
+    remote_user=${remote_user:-root}
+    read -s -p "远程密码: " remote_pass
+    echo ""
+    read -p "远程快照路径 (如 /var/snapshots/xxx.tar.gz): " remote_path
+    
+    [ -z "$remote_ip" ] || [ -z "$remote_path" ] && { error "参数不完整"; return 1; }
+    
+    log "下载快照..."
+    local local_file="/tmp/remote_snapshot_$$.tar.gz"
+    sshpass -p "$remote_pass" scp -o StrictHostKeyChecking=no \
+        -P "$remote_port" "$remote_user@$remote_ip:$remote_path" "$local_file"
+    
+    [ ! -f "$local_file" ] && { error "下载失败"; return 1; }
+    
+    log "🔄 恢复快照..."
+    local tmp_dir="/tmp/restore_$$"
+    mkdir -p "$tmp_dir"
+    tar -xzf "$local_file" -C "$tmp_dir"
+    
+    # 导入Docker
+    if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
+        log "导入 Docker 镜像..."
+        gunzip -c "$tmp_dir/docker-images.tar.gz" | docker load
+    fi
+    
+    # 恢复应用数据
+    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+        log "恢复应用数据..."
+        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+    fi
+    
+    rm -rf "$tmp_dir" "$local_file"
+    log "✅ 恢复完成"
+}
+
+#===============================================================================
+# 同步到远程
+#===============================================================================
+
+do_sync_remote() {
+    load_config 2>/dev/null || true
+    
+    if [ -z "$REMOTE_IP" ]; then
+        error "未配置远程服务器，请先运行配置"
+        return 1
+    fi
+    
+    local snap_dir="${LOCAL_DIR:-/var/snapshots}"
+    local latest=$(ls -t "$snap_dir"/*.tar.gz 2>/dev/null | head -1)
+    
+    [ -z "$latest" ] && { error "无本地快照"; return 1; }
+    
+    log "📤 同步到远程: $REMOTE_IP"
+    
+    # 创建远程目录
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
+        -p "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP" \
+        "mkdir -p ${REMOTE_DIR:-/backup}"
+    
+    # 同步
+    sshpass -p "$REMOTE_PASS" rsync -avz --progress \
+        -e "ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT:-22}" \
+        "$latest" "${REMOTE_USER:-root}@$REMOTE_IP:${REMOTE_DIR:-/backup}/"
+    
+    log "✅ 同步完成"
+}
+
+#===============================================================================
 # Telegram 通知
 #===============================================================================
 
@@ -582,37 +699,43 @@ show_menu() {
     echo "  1) 首次配置 / 重新配置"
     echo "  2) 扫描已安装应用"
     echo "  3) 创建快照备份"
-    echo "  4) 一键迁移到新服务器"
-    echo "  5) 导出 Docker 数据"
-    echo "  6) 导入 Docker 数据"
-    echo "  7) 查看本地快照"
-    echo "  8) 安装依赖"
+    echo "  4) 从本地快照恢复"
+    echo "  5) 从远程服务器恢复"
+    echo "  6) 一键迁移到新服务器"
+    echo "  7) 导出 Docker 数据"
+    echo "  8) 导入 Docker 数据"
+    echo "  9) 查看本地快照"
+    echo " 10) 同步到远程"
+    echo " 11) 安装依赖"
     echo "  0) 退出"
     echo ""
-    read -p "请选择 [0-8]: " choice
+    read -p "请选择 [0-11]: " choice
     
     case $choice in
         1) do_setup ;;
         2) detect_apps ;;
         3) 
-            load_config
-            create_snapshot "$LOCAL_DIR" "$VPS_NAME"
+            load_config 2>/dev/null || true
+            create_snapshot "${LOCAL_DIR:-/var/snapshots}" "${VPS_NAME:-snapshot}"
             ;;
-        4) do_migrate ;;
-        5) 
+        4) do_restore_local ;;
+        5) do_restore_remote ;;
+        6) do_migrate ;;
+        7) 
             read -p "输出目录 [/var/snapshots]: " dir
             docker_export "${dir:-/var/snapshots}"
             ;;
-        6)
+        8)
             read -p "输入目录 [/var/snapshots]: " dir
             docker_import "${dir:-/var/snapshots}"
             ;;
-        7)
-            load_config
+        9)
+            load_config 2>/dev/null || true
             echo ""
             ls -lh "${LOCAL_DIR:-/var/snapshots}" 2>/dev/null || echo "无快照"
             ;;
-        8) install_deps ;;
+        10) do_sync_remote ;;
+        11) install_deps ;;
         0) exit 0 ;;
         *) error "无效选项" ;;
     esac
