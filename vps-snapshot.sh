@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.7.6
+# VPS 快照备份脚本 v3.8.6
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.7                           ║"
+    echo "║           VPS 快照备份脚本 v3.8                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -512,6 +512,17 @@ create_snapshot() {
         apk list -I 2>/dev/null | awk -F' ' '{print $1}' | sed 's/-[0-9].*//' > "$tmp_dir/installed-packages.txt"
     fi
     
+    # 保存二进制文件列表（用于完整恢复 - 追踪手动安装的程序）
+    log "保存二进制文件列表..."
+    {
+        ls -1 /usr/local/bin/ 2>/dev/null
+        ls -1 /usr/local/sbin/ 2>/dev/null
+        ls -1 /opt/ 2>/dev/null
+    } | sort -u > "$tmp_dir/binary-files.txt"
+    
+    # 保存 systemd 服务列表
+    ls -1 /etc/systemd/system/*.service 2>/dev/null | xargs -I{} basename {} > "$tmp_dir/systemd-services.txt" 2>/dev/null || true
+    
     if command -v docker &>/dev/null && docker info &>/dev/null; then
         docker_export "$tmp_dir"
     fi
@@ -646,6 +657,55 @@ do_full_restore() {
             rm -f "$current_pkgs"
         fi
     fi
+    
+    # 删除快照后新增的二进制文件和服务
+    if [ -f "$tmp_dir/binary-files.txt" ]; then
+        log "清理新增的二进制文件..."
+        
+        # 检查 /usr/local/bin/
+        for f in /usr/local/bin/*; do
+            [ -e "$f" ] || continue
+            local fname=$(basename "$f")
+            if ! grep -qx "$fname" "$tmp_dir/binary-files.txt" 2>/dev/null; then
+                log "删除: /usr/local/bin/$fname"
+                rm -f "$f"
+            fi
+        done
+        
+        # 检查 /usr/local/sbin/
+        for f in /usr/local/sbin/*; do
+            [ -e "$f" ] || continue
+            local fname=$(basename "$f")
+            if ! grep -qx "$fname" "$tmp_dir/binary-files.txt" 2>/dev/null; then
+                log "删除: /usr/local/sbin/$fname"
+                rm -f "$f"
+            fi
+        done
+    fi
+    
+    # 删除快照后新增的 systemd 服务
+    if [ -f "$tmp_dir/systemd-services.txt" ]; then
+        log "清理新增的 systemd 服务..."
+        for f in /etc/systemd/system/*.service; do
+            [ -e "$f" ] || continue
+            local fname=$(basename "$f")
+            if ! grep -qx "$fname" "$tmp_dir/systemd-services.txt" 2>/dev/null; then
+                log "停止并删除服务: $fname"
+                systemctl stop "$fname" 2>/dev/null || true
+                systemctl disable "$fname" 2>/dev/null || true
+                rm -f "$f"
+            fi
+        done
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+    
+    # 清理相关配置目录
+    log "清理相关配置..."
+    # sing-box 相关
+    rm -rf /usr/local/etc/sing-box /etc/sing-box 2>/dev/null || true
+    # 其他常见手动安装程序的配置
+    rm -rf /usr/local/etc/v2ray /etc/v2ray 2>/dev/null || true
+    rm -rf /usr/local/etc/xray /etc/xray 2>/dev/null || true
     
     # 停止并删除所有Docker容器
     if command -v docker &>/dev/null; then
