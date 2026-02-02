@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v2.4
+# VPS 快照备份脚本 v2.5
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 创建/恢复快照 + rsync 远程同步 + Telegram 通知 + 自动清理
 #===============================================================================
@@ -22,7 +22,7 @@ SSH_KEY_PATH="/root/.ssh/vps_snapshot_key"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v2.4                           ║"
+    echo "║           VPS 快照备份脚本 v2.5                           ║"
     echo "║       支持 Ubuntu/Debian/CentOS/Alpine                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -386,36 +386,35 @@ do_restore() {
 
         log "完整恢复: rsync --delete"
         rsync -aAXv --delete \
-            --exclude='/proc/*' \
-            --exclude='/sys/*' \
-            --exclude='/dev/*' \
-            --exclude='/run/*' \
-            --exclude='/tmp/*' \
-            --exclude='/mnt/*' \
-            --exclude='/media/*' \
-            --exclude='/lost+found' \
-            --exclude='/etc/ssh/*' \
-            --exclude='/root/.ssh/*' \
-            --exclude='/etc/shadow' \
-            --exclude='/etc/passwd' \
-            --exclude='/etc/hostname' \
-            --exclude='/etc/hosts' \
-            --exclude='/etc/network/*' \
-            --exclude='/etc/netplan/*' \
-            --exclude="$LOCAL_DIR/*" \
-            --exclude="$temp_dir" \
+            --exclude='proc' \
+            --exclude='sys' \
+            --exclude='dev' \
+            --exclude='run' \
+            --exclude='tmp' \
+            --exclude='mnt' \
+            --exclude='media' \
+            --exclude='lost+found' \
+            --exclude='etc/ssh' \
+            --exclude='root/.ssh' \
+            --exclude='etc/shadow' \
+            --exclude='etc/passwd' \
+            --exclude='etc/hostname' \
+            --exclude='etc/hosts' \
+            --exclude='etc/network' \
+            --exclude='etc/netplan' \
+            --exclude='var/snapshots' \
             "$temp_dir/" /
     else
         log "覆盖恢复"
         rsync -aAXv \
-            --exclude='/etc/ssh/*' \
-            --exclude='/root/.ssh/*' \
-            --exclude='/etc/shadow' \
-            --exclude='/etc/passwd' \
-            --exclude='/etc/hostname' \
-            --exclude='/etc/hosts' \
-            --exclude='/etc/network/*' \
-            --exclude='/etc/netplan/*' \
+            --exclude='etc/ssh' \
+            --exclude='root/.ssh' \
+            --exclude='etc/shadow' \
+            --exclude='etc/passwd' \
+            --exclude='etc/hostname' \
+            --exclude='etc/hosts' \
+            --exclude='etc/network' \
+            --exclude='etc/netplan' \
             "$temp_dir/" /
     fi
 
