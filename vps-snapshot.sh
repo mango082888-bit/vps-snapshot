@@ -603,17 +603,21 @@ do_sync_remote() {
     
     [ -z "$latest" ] && { error "无本地快照"; return 1; }
     
-    log "📤 同步到远程: $REMOTE_IP"
+    # 远程目录：基础目录/VPS名称
+    local remote_base="${REMOTE_DIR:-/backup}"
+    local remote_path="${remote_base}/${VPS_NAME:-$(hostname)}"
     
-    # 创建远程目录
+    log "📤 同步到远程: $REMOTE_IP:$remote_path"
+    
+    # 创建远程目录（以VPS名称命名）
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no \
         -p "${REMOTE_PORT:-22}" "${REMOTE_USER:-root}@$REMOTE_IP" \
-        "mkdir -p ${REMOTE_DIR:-/backup}"
+        "mkdir -p $remote_path"
     
-    # 同步
+    # 同步到VPS专属目录
     sshpass -p "$REMOTE_PASS" rsync -avz --progress \
         -e "ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT:-22}" \
-        "$latest" "${REMOTE_USER:-root}@$REMOTE_IP:${REMOTE_DIR:-/backup}/"
+        "$latest" "${REMOTE_USER:-root}@$REMOTE_IP:$remote_path/"
     
     log "✅ 同步完成"
 }
