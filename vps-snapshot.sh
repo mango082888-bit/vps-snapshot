@@ -575,7 +575,7 @@ do_setup() {
 
 show_menu() {
     print_banner
-    load_config
+    load_config 2>/dev/null || true
     
     echo -e "${CYAN}当前配置:${NC} ${VPS_NAME:-未配置}"
     echo ""
