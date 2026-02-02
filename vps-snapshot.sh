@@ -828,6 +828,28 @@ setup_cron() {
 }
 
 #===============================================================================
+# 更新脚本
+#===============================================================================
+
+update_script() {
+    local script_path=$(readlink -f "$0")
+    local url="https://raw.githubusercontent.com/mango082888-bit/vps-snapshot/main/vps-snapshot.sh"
+    
+    log "🔄 检查更新..."
+    
+    curl -sL "$url" -o "${script_path}.new"
+    
+    if [ -f "${script_path}.new" ]; then
+        mv "${script_path}.new" "$script_path"
+        chmod +x "$script_path"
+        log "✅ 更新完成，请重新运行脚本"
+        exit 0
+    else
+        error "更新失败"
+    fi
+}
+
+#===============================================================================
 # 配置管理
 #===============================================================================
 
@@ -917,10 +939,11 @@ show_menu() {
     echo " 11) 查看本地快照"
     echo " 12) 同步到远程"
     echo " 13) 设置定时快照"
-    echo " 14) 安装依赖"
+    echo " 14) 更新脚本"
+    echo " 15) 安装依赖"
     echo "  0) 退出"
     echo ""
-    read -p "请选择 [0-14]: " choice
+    read -p "请选择 [0-15]: " choice
     
     case $choice in
         1) do_setup ;;
@@ -953,7 +976,8 @@ show_menu() {
             ;;
         12) do_sync_remote ;;
         13) setup_cron ;;
-        14) install_deps ;;
+        14) update_script ;;
+        15) install_deps ;;
         0) exit 0 ;;
         *) error "无效选项" ;;
     esac
