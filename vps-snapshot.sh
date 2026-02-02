@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.11
+# VPS 快照备份脚本 v3.12
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.11                           ║"
+    echo "║           VPS 快照备份脚本 v3.12                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -287,6 +287,19 @@ backup_app_data() {
     [ -d /usr/local/bin ] && [ "$(ls -A /usr/local/bin 2>/dev/null)" ] && backup_paths+=" /usr/local/bin"
     [ -d /usr/local/sbin ] && [ "$(ls -A /usr/local/sbin 2>/dev/null)" ] && backup_paths+=" /usr/local/sbin"
     [ -d /usr/local/etc ] && [ "$(ls -A /usr/local/etc 2>/dev/null)" ] && backup_paths+=" /usr/local/etc"
+    
+    # /usr/local 下的应用目录（x-ui, xray 等）
+    if [ -d /usr/local ]; then
+        for dir in /usr/local/*/; do
+            [ -d "$dir" ] || continue
+            local dirname=$(basename "$dir")
+            # 跳过标准目录（bin/sbin/etc/lib/share/include/man/src/games）
+            case "$dirname" in
+                bin|sbin|etc|lib|lib64|share|include|man|src|games|libexec) continue ;;
+            esac
+            backup_paths+=" $dir"
+        done
+    fi
     
     # /opt 应用目录（排除 containerd）
     if [ -d /opt ]; then
