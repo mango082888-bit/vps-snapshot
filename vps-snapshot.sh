@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.6.2
+# VPS 快照备份脚本 v3.6.6
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -160,7 +160,8 @@ detect_apps() {
     fi
     
     echo ""
-    echo "${apps[@]}"
+    # 输出应用列表（供脚本解析）
+    echo "APPS:${apps[*]}"
 }
 
 #===============================================================================
@@ -357,7 +358,7 @@ do_migrate() {
     
     # 检测应用
     local apps_output=$(detect_apps)
-    local apps=$(echo "$apps_output" | tail -1)
+    local apps=$(echo "$apps_output" | grep "^APPS:" | sed 's/^APPS://')
     
     echo ""
     read -p "输入目标服务器 IP: " target_ip
