@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #===============================================================================
-# VPS 快照备份脚本 v3.14
+# VPS 快照备份脚本 v3.15
 # 支持: Ubuntu, Debian, CentOS, Alpine
 # 功能: 智能识别应用 + Docker迁移 + 数据备份 + Telegram通知
 #===============================================================================
@@ -19,7 +19,7 @@ LOG_FILE="/var/log/vps-snapshot.log"
 print_banner() {
     echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           VPS 快照备份脚本 v3.14                           ║"
+    echo "║           VPS 快照备份脚本 v3.15                           ║"
     echo "║       智能识别 + Docker迁移 + 数据备份                    ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -491,9 +491,9 @@ if [ -d /tmp/restore_data/volumes ]; then
 fi
 
 # 恢复应用数据
-if ls /tmp/restore_data/app-data_*.tar.gz &>/dev/null; then
+if ls /tmp/restore_data/app-data.tar.gz &>/dev/null; then
     echo "恢复应用数据..."
-    tar -xzf /tmp/restore_data/app-data_*.tar.gz -C / 2>/dev/null || true
+    tar -xzf /tmp/restore_data/app-data.tar.gz -C / 2>/dev/null || true
 fi
 
 # 恢复 NPM 全局包
@@ -615,7 +615,7 @@ cleanup_local() {
     local vps_name="${VPS_NAME:-snapshot}"
     
     # 删除临时的app-data文件
-    rm -f "$snap_dir"/app-data_*.tar.gz 2>/dev/null
+    rm -f "$snap_dir"/app-data.tar.gz 2>/dev/null
     
     # 只统计VPS名称开头的快照
     local count=$(ls -1 "$snap_dir"/${vps_name}_*.tar.gz 2>/dev/null | wc -l)
@@ -675,7 +675,11 @@ do_full_restore() {
     # 解压到临时目录
     local tmp_dir="/tmp/restore_$$"
     mkdir -p "$tmp_dir"
-    tar -xzf "$snap_file" -C "$tmp_dir"
+    if ! tar -xzf "$snap_file" -C "$tmp_dir" 2>/dev/null; then
+        error "快照文件损坏或解压失败"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
     
     # 读取快照时的已安装包列表
     if [ -f "$tmp_dir/installed-packages.txt" ]; then
@@ -801,9 +805,9 @@ do_full_restore() {
     fi
     
     # 恢复应用数据
-    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+    if ls "$tmp_dir"/app-data.tar.gz &>/dev/null; then
         log "恢复应用数据..."
-        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+        tar -xzf "$tmp_dir"/app-data.tar.gz -C / 2>/dev/null || true
     fi
     
     # 启动Docker容器
@@ -824,7 +828,11 @@ do_data_restore() {
     # 解压到临时目录
     local tmp_dir="/tmp/restore_$$"
     mkdir -p "$tmp_dir"
-    tar -xzf "$snap_file" -C "$tmp_dir"
+    if ! tar -xzf "$snap_file" -C "$tmp_dir" 2>/dev/null; then
+        error "快照文件损坏或解压失败"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
     
     # 导入Docker镜像
     if [ -f "$tmp_dir/docker-images.tar.gz" ]; then
@@ -846,9 +854,11 @@ do_data_restore() {
     fi
     
     # 恢复应用数据
-    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+    if [ -f "$tmp_dir/app-data.tar.gz" ]; then
         log "恢复应用数据..."
-        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+        if ! tar -xzf "$tmp_dir/app-data.tar.gz" -C / 2>/dev/null; then
+            warn "应用数据恢复部分失败"
+        fi
     fi
     
     rm -rf "$tmp_dir"
@@ -923,9 +933,9 @@ do_restore_config_remote() {
     fi
     
     # 恢复应用数据
-    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+    if ls "$tmp_dir"/app-data.tar.gz &>/dev/null; then
         log "恢复应用数据..."
-        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+        tar -xzf "$tmp_dir"/app-data.tar.gz -C / 2>/dev/null || true
     fi
     
     rm -rf "$tmp_dir" "$local_file"
@@ -969,9 +979,9 @@ do_restore_remote() {
     fi
     
     # 恢复应用数据
-    if ls "$tmp_dir"/app-data_*.tar.gz &>/dev/null; then
+    if ls "$tmp_dir"/app-data.tar.gz &>/dev/null; then
         log "恢复应用数据..."
-        tar -xzf "$tmp_dir"/app-data_*.tar.gz -C / 2>/dev/null || true
+        tar -xzf "$tmp_dir"/app-data.tar.gz -C / 2>/dev/null || true
     fi
     
     rm -rf "$tmp_dir" "$local_file"
